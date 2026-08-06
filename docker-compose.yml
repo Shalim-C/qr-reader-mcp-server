@@ -1,0 +1,9 @@
+services:
+  qr-reader:
+    build: .
+    image: qr-reader-mcp-server:latest
+    stdin_open: true
+    environment:
+      - LOG_LEVEL=info
+      - READ_ONLY_MODE=false
+      - MAX_IMAGE_SIZE=10485760

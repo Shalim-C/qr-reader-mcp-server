@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "qr-reader": {
+      "command": "python",
+      "args": ["-m", "qr_reader.server"],
+      "env": {
+        "LOG_LEVEL": "info",
+        "READ_ONLY_MODE": "false"
+      }
+    }
+  }
+}
