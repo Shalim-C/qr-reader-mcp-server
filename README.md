@@ -48,8 +48,8 @@ vcpkg install zbar
 
 ```bash
 # 克隆
-git clone https://github.com/Shalim-C/QR.git
-cd QR
+git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
+cd qr-reader-mcp-server
 
 # 安装
 pip install -e .

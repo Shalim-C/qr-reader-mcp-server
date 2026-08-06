@@ -1,86 +1,135 @@
-"""Tests for classification module (does not require pyzbar)."""
+"""Tests for diagnosis module — mocks quality to isolate classification logic."""
 
 import numpy as np
 import pytest
-from qr_reader.core.diagnosis import diagnose_single_result, classify_result
+from qr_reader.core.diagnosis import (
+    _check_warning,
+    diagnose_single_result,
+    classify_result,
+)
 
+
+# ---------------------------------------------------------------------------
+# _check_warning
+# ---------------------------------------------------------------------------
+
+class TestCheckWarning:
+    def test_none_content(self):
+        w = _check_warning(None)
+        assert w is not None
+        assert w["warning"] == "empty_content"
+
+    def test_empty_string(self):
+        w = _check_warning("")
+        assert w is not None
+        assert w["warning"] == "empty_content"
+
+    def test_normal_content(self):
+        assert _check_warning("https://example.com") is None
+
+    def test_control_characters_in_content(self):
+        w = _check_warning("hello\x00world")
+        assert w is not None
+        assert w["warning"] == "garbled"
+
+    def test_newline_tab_are_ok(self):
+        """\\n \\r \\t are allowed control chars."""
+        assert _check_warning("line1\nline2\r\ttab") is None
+
+    def test_chinese_text(self):
+        assert _check_warning("你好世界") is None
+
+
+# ---------------------------------------------------------------------------
+# diagnose_single_result
+# ---------------------------------------------------------------------------
 
 class TestDiagnoseSingleResult:
-    def test_clean_content_returns_success(self):
-        result = {"content": "https://example.com", "bbox": [0, 0, 100, 100], "type": "QRCODE"}
-        annotated = diagnose_single_result(result)
-        assert annotated["result_code"] == "SUCCESS"
-
-    def test_none_content_returns_warning(self):
-        result = {"content": None, "bbox": [0, 0, 100, 100], "type": "QRCODE"}
-        annotated = diagnose_single_result(result)
-        assert annotated["result_code"] == "SUCCESS_WITH_WARNING"
-        assert annotated["warning"] == "empty_content"
+    def test_normal_result_returns_success(self):
+        r = diagnose_single_result({"content": "https://a.com", "type": "QRCODE"})
+        assert r["result_code"] == "SUCCESS"
 
     def test_empty_content_returns_warning(self):
-        result = {"content": "", "bbox": [0, 0, 100, 100], "type": "QRCODE"}
-        annotated = diagnose_single_result(result)
-        assert annotated["result_code"] == "SUCCESS_WITH_WARNING"
-        assert annotated["warning"] == "empty_content"
-
-    def test_control_characters_returns_warning(self):
-        result = {"content": "abc\x00def", "bbox": [0, 0, 100, 100], "type": "QRCODE"}
-        annotated = diagnose_single_result(result)
-        assert annotated["result_code"] == "SUCCESS_WITH_WARNING"
-        assert annotated["warning"] == "garbled"
-
-    def test_common_whitespace_is_not_garbled(self):
-        result = {"content": "line1\nline2\tindented", "bbox": [0, 0, 100, 100], "type": "QRCODE"}
-        annotated = diagnose_single_result(result)
-        assert annotated["result_code"] == "SUCCESS"
+        r = diagnose_single_result({"content": "", "type": "QRCODE"})
+        assert r["result_code"] == "SUCCESS_WITH_WARNING"
+        assert r["warning"] == "empty_content"
 
 
-class TestDiagnoseFailure:
-    @pytest.fixture
-    def black_img(self):
-        return np.zeros((100, 100, 3), dtype=np.uint8)
+# ---------------------------------------------------------------------------
+# classify_result — five branches
+# ---------------------------------------------------------------------------
 
-    @pytest.fixture
-    def white_img(self):
-        return np.full((100, 100, 3), 255, dtype=np.uint8)
+GOOD_QUALITY = {
+    "blur_score": 200.0,
+    "contrast": 0.8,
+    "glare_ratio": 0.1,
+    "noise_level": 5.0,
+}
+BLUR_QUALITY = {
+    "blur_score": 20.0,
+    "contrast": 0.8,
+    "glare_ratio": 0.1,
+    "noise_level": 5.0,
+}
+DARK_QUALITY = {
+    "blur_score": 200.0,
+    "contrast": 0.05,
+    "glare_ratio": 0.1,
+    "noise_level": 5.0,
+}
+GLARE_QUALITY = {
+    "blur_score": 200.0,
+    "contrast": 0.8,
+    "glare_ratio": 0.5,
+    "noise_level": 5.0,
+}
 
-    def test_no_qr_detected_blurry(self, black_img):
-        info = classify_result(black_img, qr_detected=False, decode_success=False, decoded_results=[])
+
+class TestClassifyResult:
+    def test_no_qr_blur(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=BLUR_QUALITY)
+        info = classify_result(img=None, qr_detected=False, decode_success=False, decoded_results=[])
         assert info["result_code"] == "NO_QR_FOUND"
+        assert info["analysis"]["primary_issue"] == "too_blur"
 
-    def test_qr_detected_but_decode_failed(self, black_img):
-        info = classify_result(black_img, qr_detected=True, decode_success=False, decoded_results=[])
-        assert info["result_code"] in ("RETRYABLE", "QR_UNRECOVERABLE")
+    def test_no_qr_dark(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=DARK_QUALITY)
+        info = classify_result(img=None, qr_detected=False, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "NO_QR_FOUND"
+        assert info["analysis"]["primary_issue"] == "too_dark"
 
-    def test_decode_success_with_clean_results(self, black_img):
-        results = [{"content": "hello", "bbox": [0, 0, 50, 50], "type": "QRCODE"}]
-        info = classify_result(black_img, qr_detected=True, decode_success=True, decoded_results=results)
+    def test_no_qr_generic(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
+        info = classify_result(img=None, qr_detected=False, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "NO_QR_FOUND"
+        assert info["analysis"]["primary_issue"] == "no_qr"
+
+    def test_found_but_blur_retryable(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=BLUR_QUALITY)
+        info = classify_result(img=None, qr_detected=True, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "RETRYABLE"
+        assert info["analysis"]["primary_issue"] == "blur"
+
+    def test_found_but_glare_retryable(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GLARE_QUALITY)
+        info = classify_result(img=None, qr_detected=True, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "RETRYABLE"
+        assert info["analysis"]["primary_issue"] == "glare"
+
+    def test_found_but_unrecoverable(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
+        info = classify_result(img=None, qr_detected=True, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "QR_UNRECOVERABLE"
+
+    def test_success_plain(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
+        results = [{"content": "https://x.com", "type": "QRCODE"}]
+        info = classify_result(img=None, qr_detected=True, decode_success=True, decoded_results=results)
         assert info["result_code"] == "SUCCESS"
-        assert "results" in info
-        assert len(info["results"]) == 1
+        assert info["suggestion"] is None
 
-    def test_decode_success_with_warning(self, black_img):
-        results = [{"content": "", "bbox": [0, 0, 50, 50], "type": "QRCODE"}]
-        info = classify_result(black_img, qr_detected=True, decode_success=True, decoded_results=results)
+    def test_success_with_warning(self, mocker):
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
+        results = [{"content": "", "type": "QRCODE"}]
+        info = classify_result(img=None, qr_detected=True, decode_success=True, decoded_results=results)
         assert info["result_code"] == "SUCCESS_WITH_WARNING"
-
-    def test_mixed_results(self, black_img):
-        results = [
-            {"content": "good", "bbox": [0, 0, 50, 50], "type": "QRCODE"},
-            {"content": "", "bbox": [100, 100, 50, 50], "type": "QRCODE"},
-        ]
-        info = classify_result(black_img, qr_detected=True, decode_success=True, decoded_results=results)
-        assert info["result_code"] == "SUCCESS_WITH_WARNING"
-        assert len(info["results"]) == 2
-
-    def test_analysis_contains_quality(self, black_img):
-        info = classify_result(black_img, qr_detected=False, decode_success=False, decoded_results=[])
-        assert "quality" in info["analysis"]
-        assert set(info["analysis"]["quality"].keys()) == {
-            "blur_score", "contrast", "glare_ratio", "noise_level",
-        }
-
-    def test_suggestion_in_failure(self, black_img):
-        info = classify_result(black_img, qr_detected=False, decode_success=False, decoded_results=[])
-        assert info["suggestion"] is not None
-        assert len(info["suggestion"]) > 0

@@ -1,11 +1,35 @@
 """QR code decoding core.
 
 Wraps pyzbar to locate and decode QR codes from OpenCV images.
+Uses OpenCV QRCodeDetector for pure detection (no decode) to
+distinguish "found but unreadable" from "not found at all".
 """
 
 import cv2
 import numpy as np
 from pyzbar import pyzbar
+
+# ── OpenCV QR detector — used for pure detection, not decoding ────────
+_qr_detector = cv2.QRCodeDetector()
+
+
+def detect_qr_regions(img: np.ndarray) -> bool:
+    """Detect whether the image contains any QR-code-like regions.
+
+    Uses OpenCV's QRCodeDetector.detect() which looks for finder
+    patterns without attempting to decode.  This allows downstream
+    code to distinguish "found but unreadable" (→ RETRYABLE) from
+    "nothing here" (→ NO_QR_FOUND).
+
+    Args:
+        img: BGR or grayscale image.
+
+    Returns:
+        True if at least one QR code region was detected.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    retval, _ = _qr_detector.detect(gray)
+    return retval
 
 
 def clamp_bbox(bbox: list[int], img_shape: tuple) -> tuple[int, int, int, int]:

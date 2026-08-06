@@ -18,7 +18,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region, clamp_bbox
+from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region, clamp_bbox, detect_qr_regions
 from qr_reader.core.diagnosis import classify_result
 from qr_reader.core.quality import analyze_image_quality
 from qr_reader.core.url_utils import is_private_url
@@ -30,7 +30,7 @@ from qr_reader.core.url_utils import is_private_url
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").lower()
 READ_ONLY_MODE = os.getenv("READ_ONLY_MODE", "false").lower() == "true"
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "10485760"))  # 10 MB
-MAX_INPUT_PIXELS = int(os.getenv("MAX_INPUT_PIXELS", "1920"))  # auto-resize limit
+MAX_INPUT_PIXELS = int(os.getenv("MAX_INPUT_PIXELS", "2560"))  # auto-resize limit
 
 _ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff"}
 
@@ -134,8 +134,8 @@ def _validate_enhance_params(op: str, params: dict) -> dict:
     # ── sharpen singularity guard: 9*s − 8 == 0 → s ≈ 0.8889 ────────────
     if op == "sharpen":
         s = cleaned["strength"]
-        if abs(9 * s - 8) < 0.05:
-            s = 0.94 if s < 0.89 else 0.84  # nudge away from singularity
+        if abs(9 * s - 8) < 0.08:
+            s = 0.96 if s < 0.89 else 0.82  # nudge well clear of singularity
             cleaned["strength"] = s
 
     return cleaned
@@ -305,7 +305,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return _error("IMAGE_LOAD_FAILED", str(exc))
 
         results = decode_qr_from_image(img)
-        qr_detected = len(results) > 0
+        qr_detected = detect_qr_regions(img)
         info = classify_result(img, qr_detected, len(results) > 0, results)
         response = {
             "success": info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING"),
@@ -342,7 +342,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         # 无增强操作 → 直接裁剪解码（复用 decode_qr_from_region）
         if not operations:
             results = decode_qr_from_region(img, bbox)
-            classify_img = img  # 质量分析基于原图
+            x, y, w, h = clamp_bbox(bbox, img.shape)
+            classify_img = img[y:y + h, x:x + w] if w > 0 and h > 0 else img
         else:
             # 有增强操作 → 裁剪→增强→解码
             x, y, w, h = clamp_bbox(bbox, img.shape)
@@ -354,7 +355,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             enhanced = apply_operations(roi, operations)
             results = decode_qr_from_image(enhanced)
             classify_img = enhanced  # 质量分析基于增强后的图
-        qr_detected = len(results) > 0
+        qr_detected = detect_qr_regions(classify_img)
         info = classify_result(classify_img, qr_detected, len(results) > 0, results)
 
         response = {

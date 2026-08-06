@@ -21,7 +21,9 @@ def analyze_image_quality(img: np.ndarray) -> dict:
     blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
     contrast = float(gray.max() - gray.min()) / 255.0
     glare_ratio = float(np.sum(gray > 240)) / gray.size
-    noise_level = float(np.std(cv2.GaussianBlur(gray, (0, 0), 3)))
+    noise_level = float(np.std(
+        gray.astype(float) - cv2.GaussianBlur(gray, (0, 0), 3).astype(float)
+    ))
     return {
         "blur_score": round(blur_score, 4),
         "contrast": round(contrast, 4),

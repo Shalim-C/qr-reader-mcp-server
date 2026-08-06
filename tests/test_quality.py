@@ -1,5 +1,6 @@
-"""Tests for image quality analysis module."""
+"""Tests for quality module — pure numpy/cv2, no external dependencies."""
 
+import cv2
 import numpy as np
 import pytest
 from qr_reader.core.quality import (
@@ -10,50 +11,108 @@ from qr_reader.core.quality import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _bgr(gray: np.ndarray) -> np.ndarray:
+    """Convert 2D grayscale to 3-channel BGR for realistic input."""
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+
+# ---------------------------------------------------------------------------
+# analyze_image_quality
+# ---------------------------------------------------------------------------
+
 class TestAnalyzeImageQuality:
-    def test_returns_four_keys(self):
-        img = np.zeros((100, 100, 3), dtype=np.uint8)
-        result = analyze_image_quality(img)
-        assert set(result.keys()) == {"blur_score", "contrast", "glare_ratio", "noise_level"}
+    def test_pure_black(self):
+        img = np.zeros((100, 100), dtype=np.uint8)
+        q = analyze_image_quality(img)
+        assert q["contrast"] == 0.0
+        assert q["glare_ratio"] == 0.0
+        assert q["noise_level"] == 0.0
 
-    def test_all_black_image(self):
-        """Fully black image — zero contrast, zero glare."""
-        img = np.zeros((100, 100, 3), dtype=np.uint8)
-        result = analyze_image_quality(img)
-        assert result["contrast"] == 0.0
-        assert result["glare_ratio"] == 0.0
+    def test_pure_white(self):
+        img = np.full((100, 100), 255, dtype=np.uint8)
+        q = analyze_image_quality(img)
+        assert q["contrast"] == 0.0
+        assert q["glare_ratio"] == 1.0  # all pixels > 240
+        assert q["noise_level"] == 0.0
 
-    def test_all_white_image(self):
-        """Fully white image — zero contrast, max glare."""
-        img = np.full((100, 100, 3), 255, dtype=np.uint8)
-        result = analyze_image_quality(img)
-        assert result["contrast"] == 0.0
-        assert result["glare_ratio"] == 1.0
+    def test_high_contrast_chessboard(self):
+        """Chessboard gives contrast=1.0 and reasonable blur score."""
+        img = np.zeros((100, 100), dtype=np.uint8)
+        img[::2, ::2] = 255
+        img[1::2, 1::2] = 255
+        q = analyze_image_quality(img)
+        assert q["contrast"] == 1.0
 
-    def test_sharp_vs_blurry(self):
-        """A sharp edge image should have higher blur_score than uniform."""
+    def test_noise_increases_noise_level(self):
+        """Residual-based noise metric: noisy > clean."""
+        clean = np.full((100, 100), 128, dtype=np.uint8)
+        noisy = clean.copy()
+        noisy[::3, ::3] = 255
+        noisy[1::3, 2::3] = 0
+        q_clean = analyze_image_quality(clean)
+        q_noisy = analyze_image_quality(noisy)
+        assert q_noisy["noise_level"] > q_clean["noise_level"]
+
+    def test_blur_reduces_blur_score(self):
+        """Sharp edge → high blur_score; Gaussian blur → lower."""
         sharp = np.zeros((100, 100), dtype=np.uint8)
-        sharp[:, 50:] = 255
-        blurry = np.full((100, 100), 128, dtype=np.uint8)
-        sharp_score = analyze_image_quality(sharp)["blur_score"]
-        blurry_score = analyze_image_quality(blurry)["blur_score"]
-        assert sharp_score > blurry_score
+        sharp[40:60, :] = 255
+        q_sharp = analyze_image_quality(sharp)
+        blurred = cv2.GaussianBlur(sharp, (5, 5), 3)
+        q_blur = analyze_image_quality(blurred)
+        assert q_blur["blur_score"] < q_sharp["blur_score"]
 
-    def test_grayscale_input(self):
-        img = np.random.randint(0, 256, (50, 50), dtype=np.uint8)
-        result = analyze_image_quality(img)
-        assert all(k in result for k in ["blur_score", "contrast", "glare_ratio", "noise_level"])
+    def test_accepts_bgr_input(self):
+        """Should work with 3-channel BGR."""
+        img = _bgr(np.zeros((100, 100), dtype=np.uint8))
+        q = analyze_image_quality(img)
+        assert "blur_score" in q
+
+    def test_glare_detection(self):
+        """Half-white image should report glare."""
+        img = np.zeros((100, 100), dtype=np.uint8)
+        img[0:50, :] = 250
+        q = analyze_image_quality(img)
+        assert q["glare_ratio"] == pytest.approx(0.5)
+
+    def test_all_values_rounded_to_4_decimals(self):
+        img = np.zeros((100, 100), dtype=np.uint8)
+        q = analyze_image_quality(img)
+        for v in q.values():
+            # Round to 4 and back should be equal (no raw float noise)
+            assert round(v, 4) == v
 
 
-class TestThresholds:
-    def test_is_too_blur_below_threshold(self):
+# ---------------------------------------------------------------------------
+# Threshold helpers
+# ---------------------------------------------------------------------------
+
+class TestIsTooBlur:
+    def test_below_threshold(self):
         assert is_too_blur(30.0, threshold=50.0) is True
-        assert is_too_blur(60.0, threshold=50.0) is False
 
-    def test_is_low_contrast(self):
-        assert is_low_contrast(0.10, threshold=0.15) is True
-        assert is_low_contrast(0.20, threshold=0.15) is False
+    def test_above_threshold(self):
+        assert is_too_blur(80.0, threshold=50.0) is False
 
-    def test_has_glare(self):
-        assert has_glare(0.35, threshold=0.3) is True
-        assert has_glare(0.20, threshold=0.3) is False
+    def test_exact_threshold(self):
+        assert is_too_blur(50.0, threshold=50.0) is False  # strict <
+
+
+class TestIsLowContrast:
+    def test_below(self):
+        assert is_low_contrast(0.1, threshold=0.15) is True
+
+    def test_above(self):
+        assert is_low_contrast(0.3, threshold=0.15) is False
+
+
+class TestHasGlare:
+    def test_above(self):
+        assert has_glare(0.5, threshold=0.3) is True
+
+    def test_below(self):
+        assert has_glare(0.1, threshold=0.3) is False
