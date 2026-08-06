@@ -18,7 +18,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region
+from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region, clamp_bbox
 from qr_reader.core.diagnosis import classify_result
 from qr_reader.core.quality import analyze_image_quality
 from qr_reader.core.url_utils import is_private_url
@@ -109,30 +109,68 @@ def image_to_base64(img: np.ndarray) -> str:
 # Image enhancement pipeline
 # ---------------------------------------------------------------------------
 
+# ── parameter bounds (prevents OOM / NaN / hangs) ────────────────────────
+_ENHANCE_BOUNDS = {
+    "upscale":         {"scale":        (1.0, 8.0)},
+    "sharpen":         {"strength":     (0.3, 5.0)},
+    "adjust_contrast": {"alpha":        (0.5, 3.0)},
+    "denoise":         {"h":            (3, 30)},
+}
+_MAX_OPERATIONS = 5
+
+
+def _validate_enhance_params(op: str, params: dict) -> dict:
+    """Clamp enhancement parameters to safe ranges and return cleaned params.
+
+    Also guards against the sharpen singularity at strength ≈ 0.889
+    where the kernel denominator (9*strength − 8) approaches zero.
+    """
+    bounds = _ENHANCE_BOUNDS.get(op, {})
+    cleaned = {}
+    for key, (lo, hi) in bounds.items():
+        val = params.get(key, (lo + hi) / 2)  # default to mid-point
+        cleaned[key] = max(lo, min(hi, val))
+
+    # ── sharpen singularity guard: 9*s − 8 == 0 → s ≈ 0.8889 ────────────
+    if op == "sharpen":
+        s = cleaned["strength"]
+        if abs(9 * s - 8) < 0.05:
+            s = 0.94 if s < 0.89 else 0.84  # nudge away from singularity
+            cleaned["strength"] = s
+
+    return cleaned
+
+
 def apply_operations(img: np.ndarray, operations: list[dict]) -> np.ndarray:
-    """Apply a sequence of enhancement operations in order."""
+    """Apply a sequence of enhancement operations in order.
+
+    Parameters are clamped to safe ranges before use.
+    At most _MAX_OPERATIONS steps are applied.
+    """
     result = img.copy()
-    for step in operations:
+    for step in operations[:_MAX_OPERATIONS]:
         op = step["op"]
-        params = step.get("params", {})
+        raw_params = step.get("params", {})
+        params = _validate_enhance_params(op, raw_params)
+
         if op == "upscale":
-            scale = params.get("scale", 2.0)
+            scale = params["scale"]
             result = cv2.resize(
                 result, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC
             )
         elif op == "sharpen":
-            strength = params.get("strength", 1.5)
-            kernel = (
-                np.array([[-1, -1, -1], [-1, 9 * strength, -1], [-1, -1, -1]])
-                / (9 * strength - 8)
-            )
+            s = params["strength"]
+            denom = 9 * s - 8
+            kernel = np.array(
+                [[-1, -1, -1], [-1, 9 * s, -1], [-1, -1, -1]]
+            ) / denom
             result = cv2.filter2D(result, -1, kernel)
         elif op == "adjust_contrast":
-            alpha = params.get("alpha", 1.5)
-            beta = params.get("beta", 0)
-            result = cv2.convertScaleAbs(result, alpha=alpha, beta=beta)
+            result = cv2.convertScaleAbs(
+                result, alpha=params["alpha"], beta=params.get("beta", 0)
+            )
         elif op == "denoise":
-            h = params.get("h", 10)
+            h = params["h"]
             result = cv2.fastNlMeansDenoisingColored(result, None, h, h, 7, 21)
     return result
 
@@ -307,10 +345,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             classify_img = img  # 质量分析基于原图
         else:
             # 有增强操作 → 裁剪→增强→解码
-            x, y, w, h = bbox
-            x, y = max(0, x), max(0, y)
-            w = min(w, img.shape[1] - x)
-            h = min(h, img.shape[0] - y)
+            x, y, w, h = clamp_bbox(bbox, img.shape)
 
             if w <= 0 or h <= 0:
                 return _error("INVALID_BBOX", "裁剪区域无效（宽/高 ≤ 0）")
