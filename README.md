@@ -31,6 +31,8 @@ QR Reader MCP Server 把 zbar 二维码解码能力**嵌入** AI 工作流——
 
 ## 快速开始
 
+> 🤖 **用 AI Agent 装？** 把 [INSTALL_FOR_AGENT.md](INSTALL_FOR_AGENT.md) 全文复制给你的 Agent，它会自动完成安装配置。
+
 ### 前置依赖
 
 ```bash
@@ -123,6 +125,10 @@ python -m qr_reader.server
 | `LOG_LEVEL` | `info` | 日志级别：`debug`、`info`、`warning`、`error` |
 | `READ_ONLY_MODE` | `false` | 设为 `true` 禁用 `enhance_and_decode`（仅保留 `decode_qrcode_full`） |
 | `MAX_IMAGE_SIZE` | `10485760` | 图片大小上限（字节，默认 10 MB） |
+| `MAX_INPUT_PIXELS` | `2560` | 图片长边超过此值自动缩放 |
+| `QR_BLUR_THRESHOLD` | `50.0` | 模糊度阈值，越低越严格 |
+| `QR_CONTRAST_THRESHOLD` | `0.15` | 对比度阈值，越低越严格 |
+| `QR_GLARE_THRESHOLD` | `0.3` | 反光检测阈值，越低越敏感 |
 
 ---
 
@@ -178,7 +184,7 @@ python -m qr_reader.server
 | `image_path` | string | 三选一 | 本地图片绝对路径（推荐——无管道开销） |
 | `image_base64` | string | 三选一 | Base64 编码的图片 |
 | `image_url` | string | 三选一 | 图片 URL |
-| `bbox` | [int,int,int,int] | 是 | 目标区域 `[x, y, width, height]` |
+| `bbox` | [int,int,int,int] 或 [[int,int,int,int], ...] | 是 | 目标区域。单区域传 `[x, y, width, height]`，多区域传 `[[x1,y1,w1,h1], ...]` |
 | `operations` | object[] | 否 | 增强操作列表（见下方），不传则仅裁剪解码 |
 
 **增强操作：**
