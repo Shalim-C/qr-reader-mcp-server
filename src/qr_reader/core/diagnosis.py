@@ -8,6 +8,8 @@ Produces one of five result codes:
   QR_UNRECOVERABLE         — QR found but permanently unreadable
 """
 
+import os
+
 import numpy as np
 from qr_reader.core.quality import (
     analyze_image_quality,
@@ -17,9 +19,9 @@ from qr_reader.core.quality import (
 )
 
 THRESHOLDS = {
-    "blur": 50.0,
-    "contrast": 0.15,
-    "glare": 0.3,
+    "blur": float(os.getenv("QR_BLUR_THRESHOLD", "50.0")),
+    "contrast": float(os.getenv("QR_CONTRAST_THRESHOLD", "0.15")),
+    "glare": float(os.getenv("QR_GLARE_THRESHOLD", "0.3")),
 }
 
 

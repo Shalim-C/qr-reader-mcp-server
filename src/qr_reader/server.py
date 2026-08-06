@@ -9,6 +9,7 @@ enhance operations fall back to Pillow, quality metrics use pure numpy.
 """
 
 import base64
+import importlib.metadata
 import io
 import json
 import logging
@@ -50,6 +51,11 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("qr-reader-mcp")
+
+try:
+    __version__ = importlib.metadata.version("qr-reader-mcp-server")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "0.0.0"
 
 app = Server("qr-reader-mcp-server")
 
@@ -304,10 +310,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "success": info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING"),
             **info,
         }
+        quality = info.get("analysis", {}).get("quality", {})
         logger.info(
-            "decode_qrcode_full → %s (detected=%d)",
+            "decode_qrcode_full → %s (detected=%d) quality: blur=%.1f contrast=%.2f glare=%.2f",
             info["result_code"],
             len(results),
+            quality.get("blur_score", -1),
+            quality.get("contrast", -1),
+            quality.get("glare_ratio", -1),
         )
         return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
 
@@ -325,38 +335,50 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         except Exception as exc:
             return _error("IMAGE_LOAD_FAILED", str(exc))
 
-        bbox = arguments.get("bbox")
+        bbox_raw = arguments.get("bbox")
         operations = arguments.get("operations", [])
 
-        # Validate bbox
-        if not bbox or len(bbox) != 4:
-            return _error("INVALID_BBOX", "bbox must be [x, y, width, height]")
-
-        # No enhancement → crop and decode directly
-        if not operations:
-            results = decode_qr_from_region(img, bbox)
-            x, y, w, h = clamp_bbox(bbox, img.shape)
-            classify_img = img[y:y + h, x:x + w] if w > 0 and h > 0 else img
+        # Normalize: single [x,y,w,h] → [[x,y,w,h]] for uniform processing
+        if bbox_raw and all(isinstance(v, int) for v in bbox_raw):
+            if len(bbox_raw) != 4:
+                return _error("INVALID_BBOX", "bbox must be [x, y, width, height] or [[x,y,w,h], ...]")
+            bboxes = [bbox_raw]
+        elif bbox_raw and all(isinstance(r, list) for r in bbox_raw):
+            bboxes = bbox_raw
         else:
-            x, y, w, h = clamp_bbox(bbox, img.shape)
-            if w <= 0 or h <= 0:
-                return _error("INVALID_BBOX", "Invalid crop region (width/height ≤ 0)")
-            roi = img[y:y + h, x:x + w]
-            enhanced = apply_operations(roi, operations)
-            results = decode_qr_from_image(enhanced)
-            classify_img = enhanced
+            return _error("INVALID_BBOX", "bbox must be [x, y, width, height] or [[x,y,w,h], ...]")
 
-        qr_detected = detect_qr_regions(classify_img)
-        info = classify_result(classify_img, qr_detected, len(results) > 0, results)
+        all_results: list[dict] = []
+        for bi, bbox in enumerate(bboxes):
+            # No enhancement → crop and decode directly
+            if not operations:
+                results = decode_qr_from_region(img, bbox)
+                x, y, w, h = clamp_bbox(bbox, img.shape)
+                classify_img = img[y:y + h, x:x + w] if w > 0 and h > 0 else img
+            else:
+                x, y, w, h = clamp_bbox(bbox, img.shape)
+                if w <= 0 or h <= 0:
+                    return _error("INVALID_BBOX", f"Region {bi}: invalid crop (width/height ≤ 0)")
+                roi = img[y:y + h, x:x + w]
+                enhanced = apply_operations(roi, operations)
+                results = decode_qr_from_image(enhanced)
+                classify_img = enhanced
+
+            qr_detected = detect_qr_regions(classify_img)
+            info = classify_result(classify_img, qr_detected, len(results) > 0, results)
+            info["region_index"] = bi
+            info["region_bbox"] = bbox
+            all_results.append(info)
 
         response = {
-            "success": info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING"),
+            "success": any(r["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING") for r in all_results),
             "applied_operations": [s["op"] for s in operations],
-            **info,
+            "regions_processed": len(all_results),
+            "results": all_results,
         }
         logger.info(
-            "enhance_and_decode → %s (ops=%s)",
-            info["result_code"],
+            "enhance_and_decode → %d regions (ops=%s)",
+            len(all_results),
             response["applied_operations"],
         )
         return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
@@ -401,8 +423,8 @@ def _check_prerequisites() -> None:
 
 async def main():
     logger.info(
-        "Starting QR Reader MCP Server (read_only=%s, cv2=%s)",
-        READ_ONLY_MODE, is_cv2_available(),
+        "Starting QR Reader MCP Server v%s (read_only=%s, cv2=%s)",
+        __version__, READ_ONLY_MODE, is_cv2_available(),
     )
     _check_prerequisites()
     async with stdio_server() as (read_stream, write_stream):

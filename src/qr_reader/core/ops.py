@@ -219,31 +219,42 @@ def op_sharpen(arr: np.ndarray, strength: float) -> np.ndarray:
         import cv2
         return cv2.filter2D(arr, -1, kernel)
 
-    # Pillow fallback — same kernel via numpy convolution
+    # Pillow fallback — same kernel via vectorized numpy convolution
     _ensure_pillow()
     if arr.ndim == 3:
-        # Per-channel convolution
         result = np.zeros_like(arr, dtype=np.float32)
         for c in range(arr.shape[2]):
             ch = arr[:, :, c].astype(np.float32)
             h, w = ch.shape
             padded = np.pad(ch, 1, mode='edge')
-            conv = np.zeros_like(ch)
-            for dy in range(3):
-                for dx in range(3):
-                    if kernel[dy, dx] != 0:
-                        conv += kernel[dy, dx] * padded[dy:dy + h, dx:dx + w]
+            conv = (
+                kernel[0, 0] * padded[0:h,     0:w] +
+                kernel[0, 1] * padded[0:h,     1:w + 1] +
+                kernel[0, 2] * padded[0:h,     2:w + 2] +
+                kernel[1, 0] * padded[1:h + 1, 0:w] +
+                kernel[1, 1] * padded[1:h + 1, 1:w + 1] +
+                kernel[1, 2] * padded[1:h + 1, 2:w + 2] +
+                kernel[2, 0] * padded[2:h + 2, 0:w] +
+                kernel[2, 1] * padded[2:h + 2, 1:w + 1] +
+                kernel[2, 2] * padded[2:h + 2, 2:w + 2]
+            )
             result[:, :, c] = np.clip(conv, 0, 255)
         return result.astype(np.uint8)
     else:
         ch = arr.astype(np.float32)
         h, w = ch.shape
         padded = np.pad(ch, 1, mode='edge')
-        conv = np.zeros_like(ch)
-        for dy in range(3):
-            for dx in range(3):
-                if kernel[dy, dx] != 0:
-                    conv += kernel[dy, dx] * padded[dy:dy + h, dx:dx + w]
+        conv = (
+            kernel[0, 0] * padded[0:h,     0:w] +
+            kernel[0, 1] * padded[0:h,     1:w + 1] +
+            kernel[0, 2] * padded[0:h,     2:w + 2] +
+            kernel[1, 0] * padded[1:h + 1, 0:w] +
+            kernel[1, 1] * padded[1:h + 1, 1:w + 1] +
+            kernel[1, 2] * padded[1:h + 1, 2:w + 2] +
+            kernel[2, 0] * padded[2:h + 2, 0:w] +
+            kernel[2, 1] * padded[2:h + 2, 1:w + 1] +
+            kernel[2, 2] * padded[2:h + 2, 2:w + 2]
+        )
         return np.clip(conv, 0, 255).astype(arr.dtype)
 
 
