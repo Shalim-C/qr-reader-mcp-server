@@ -1,10 +1,12 @@
 # QR Reader MCP Server
 
-**只要有图片（本地路径 / base64 / URL），就能读出里面的二维码内容。**
+**让 AI 获得二维码解码能力——只需图片输入，返回详细质量指标和失败原因，非简单成功/失败。**
 
 `decode_qrcode_full` 只需图片输入即可工作，任何对接了 MCP 的模型都能直接调用。`enhance_and_decode` 需要模型自行分析图片质量并指定增强区域与策略，因此最适合具备视觉能力的模型使用。
 
-> 🤖 **通过 AI Agent 安装** — 把 [INSTALL_FOR_AGENT.md](INSTALL_FOR_AGENT.md) 全文复制给你的 AI Agent（Claude Code、Codex、Trae、Cursor 等），它会自动完成安装配置。
+> 🤖 **通过 AI Agent 安装** — 把这条链接发给你的 AI Agent，它会自动完成安装配置：
+>
+> [`INSTALL_FOR_AGENT.md`](https://raw.githubusercontent.com/Shalim-C/qr-reader-mcp-server/main/INSTALL_FOR_AGENT.md)
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -32,8 +34,6 @@ QR Reader MCP Server 把 zbar 二维码解码能力**嵌入** AI 工作流——
 ---
 
 ## 快速开始
-
-> 🤖 **用 AI Agent 装？** 把 [INSTALL_FOR_AGENT.md](INSTALL_FOR_AGENT.md) 全文复制给你的 Agent，它会自动完成安装配置。
 
 ### 前置依赖
 
