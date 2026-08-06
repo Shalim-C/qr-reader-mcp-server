@@ -58,4 +58,4 @@ testpaths = ["tests"]
 markers = [
     "benchmark: marks a test as a performance benchmark (deselected by default)",
 ]
-addopts = "--strict-markers --ignore=tests/bench"
+addopts = "--ignore=tests/bench"
