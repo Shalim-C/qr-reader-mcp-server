@@ -51,12 +51,11 @@ def _decode_with_pyzbar(img: np.ndarray) -> list[dict]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def detect_qr_regions(img: np.ndarray) -> bool:
+def detect_qr_regions(img: np.ndarray) -> bool | None:
     """Detect whether the image contains any QR-code-like regions.
 
-    Uses OpenCV QRCodeDetector.detect() when available; returns False
-    in light mode (the diagnosis engine falls back to heuristic
-    classification).
+    Uses OpenCV QRCodeDetector.detect() when available; returns None
+    in light mode (the diagnosis engine handles this as "unknown").
     """
     from qr_reader.core.ops import qr_detect
     return qr_detect(img)

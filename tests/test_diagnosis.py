@@ -133,3 +133,31 @@ class TestClassifyResult:
         results = [{"content": "", "type": "QRCODE"}]
         info = classify_result(img=None, qr_detected=True, decode_success=True, decoded_results=results)
         assert info["result_code"] == "SUCCESS_WITH_WARNING"
+
+    def test_qr_detected_none_decode_success(self, mocker):
+        """Light mode — no detection info but decode succeeded."""
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
+        results = [{"content": "https://x.com", "type": "QRCODE"}]
+        info = classify_result(img=None, qr_detected=None, decode_success=True, decoded_results=results)
+        assert info["result_code"] == "SUCCESS"
+
+    def test_qr_detected_none_decode_fail_blur(self, mocker):
+        """Light mode — decode failed, blur detected."""
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=BLUR_QUALITY)
+        info = classify_result(img=None, qr_detected=None, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "RETRYABLE"
+        assert "blur" in info["analysis"]["primary_issue"]
+
+    def test_qr_detected_none_decode_fail_glare(self, mocker):
+        """Light mode — decode failed, glare detected."""
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GLARE_QUALITY)
+        info = classify_result(img=None, qr_detected=None, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "RETRYABLE"
+        assert "glare" in info["analysis"]["primary_issue"]
+
+    def test_qr_detected_none_decode_fail_unknown(self, mocker):
+        """Light mode — decode failed, image looks fine."""
+        mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
+        info = classify_result(img=None, qr_detected=None, decode_success=False, decoded_results=[])
+        assert info["result_code"] == "RETRYABLE"
+        assert info["analysis"]["primary_issue"] == "unknown"

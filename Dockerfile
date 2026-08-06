@@ -8,7 +8,7 @@ WORKDIR /app
 
 COPY pyproject.toml .
 COPY src/ src/
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir .[full]
 
 ENV LOG_LEVEL=info
 ENV READ_ONLY_MODE=false

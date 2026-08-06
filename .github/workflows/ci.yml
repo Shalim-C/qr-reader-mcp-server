@@ -8,9 +8,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
@@ -21,8 +22,17 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libzbar0
+
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # libzbar0 on Windows via vcpkg — pre-installed on GitHub runners
+          vcpkg install zbar:x64-windows
+          # Let Python find the DLL
+          echo "C:/vcpkg/installed/x64-windows/bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Install Python dependencies
         run: |

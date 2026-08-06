@@ -54,7 +54,7 @@ def diagnose_single_result(result: dict) -> dict:
 
 def classify_result(
     img: np.ndarray,
-    qr_detected: bool,
+    qr_detected: bool | None,
     decode_success: bool,
     decoded_results: list,
 ) -> dict:
@@ -62,13 +62,45 @@ def classify_result(
 
     Args:
         img: Source image (BGR or grayscale).
-        qr_detected: Whether any QR-like shapes were found.
+        qr_detected: Whether any QR-like shapes were found, or None
+            when detection is unavailable (light mode / no cv2).
         decode_success: Whether at least one QR was decoded.
         decoded_results: List of raw decode results.
 
     Returns:
         dict with keys: result_code, analysis, suggestion, results (if success).
     """
+    # -- Detection unavailable (light mode) — quality still informative -----
+    if qr_detected is None:
+        quality = analyze_image_quality(img)
+        if decode_success:
+            annotated = [diagnose_single_result(r) for r in decoded_results]
+            has_warning = any(r["result_code"] == "SUCCESS_WITH_WARNING" for r in annotated)
+            return {
+                "result_code": "SUCCESS_WITH_WARNING" if has_warning else "SUCCESS",
+                "results": annotated,
+                "analysis": {"total_detected": len(annotated), "quality": quality},
+                "suggestion": None,
+            }
+        # Decode failed but we can't tell if QR exists (no cv2)
+        if is_too_blur(quality["blur_score"]):
+            return {
+                "result_code": "RETRYABLE",
+                "analysis": {"primary_issue": "blur", "quality": quality},
+                "suggestion": "Image is blurry — try re-shooting with better focus, or install cv2 for finder-pattern detection",
+            }
+        if has_glare(quality["glare_ratio"]):
+            return {
+                "result_code": "RETRYABLE",
+                "analysis": {"primary_issue": "glare", "quality": quality},
+                "suggestion": "Glare detected — try adjusting the angle and retry",
+            }
+        return {
+            "result_code": "RETRYABLE",
+            "analysis": {"primary_issue": "unknown", "quality": quality},
+            "suggestion": "No QR decoded. Could be no QR in image, or the code needs enhancement. Try enhance_and_decode on suspected QR regions, or install cv2 for better detection",
+        }
+
     quality = analyze_image_quality(img)
 
     # -- No QR found --------------------------------------------------------

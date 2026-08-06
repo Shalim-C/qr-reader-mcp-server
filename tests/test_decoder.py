@@ -168,6 +168,12 @@ class TestDetectQrRegions:
         gray = np.zeros((100, 100), dtype=np.uint8)
         assert detect_qr_regions(gray) is True
 
+    def test_returns_none_when_detection_unavailable(self, mocker):
+        """In light mode (no cv2), qr_detect returns None → detect_qr_regions returns None."""
+        mocker.patch("qr_reader.core.ops.qr_detect", return_value=None)
+        gray = np.zeros((100, 100), dtype=np.uint8)
+        assert detect_qr_regions(gray) is None
+
 
 # ---------------------------------------------------------------------------
 # clamp_bbox

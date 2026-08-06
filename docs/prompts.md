@@ -1,42 +1,57 @@
-# 示例对话
+# Agent 行为指南（写给 AI 模型看的）
 
-接入 QR Reader MCP Server 后，试试对 AI 助手说这些。
+接入 QR Reader MCP Server 后，你会获得两个工具：`decode_qrcode_full` 和 `enhance_and_decode`。以下是你的行为准则。
 
-## 基础扫码
+## 触发时机
 
-- "帮我读一下这张截图里的二维码"
-- "这个二维码里面是什么？"
-- "扫描这张照片里的所有二维码"
+| 你的能力 | 何时触发 |
+|----------|----------|
+| 多模态模型（能看图） | 看到用户提供的图片中有二维码 → **主动调用** `decode_qrcode_full`，不等用户说"帮我扫" |
+| 纯文本模型 | 用户给了图片路径/URL 并提到"扫码""二维码"等词 → 调用 `decode_qrcode_full` |
 
-## 应对质量问题
+## 收到返回后——按 result_code 决策
 
-- "这个二维码太模糊了——试试增强后再读"
-- "收据上的二维码很难扫——调一下对比度再试试"
-- "这张照片二维码反光很严重，调整角度后重新扫"
-- "二维码在这张图里太小了——能放大它吗？"
+### `SUCCESS`
+解码成功，内容在 `results[].content`。**直接告诉用户内容，不废话。**
+多码图片时逐条列出，附上位置信息（`bbox`）。
 
-## 多码图片
+### `SUCCESS_WITH_WARNING`
+内容取到了但可能有异常（空内容、乱码、控制字符）。
+把内容和警告一起告诉用户，让他确认是否正确。
 
-- "帮我提取这张活动海报里的所有二维码"
-- "这页上有多个二维码——全部读出来，告诉我每个是什么"
-- "列出这张文档扫描件里所有的二维码链接"
+### `RETRYABLE`
+关键字段：`analysis.primary_issue` 和 `analysis.quality`。
+解码失败但**可修复**——根据 issue 类型选择增强策略，调用 `enhance_and_decode`：
 
-## 完整工作流
+| primary_issue | 增强操作 |
+|--------------|---------|
+| `blur` | `[{"op":"sharpen","params":{"strength":2.0}}]` + 可叠 `upscale` |
+| `glare` | `[{"op":"adjust_contrast","params":{"alpha":2.0}}]` + 提示用户换角度 |
+| `low_contrast` | `[{"op":"adjust_contrast","params":{"alpha":2.5}}]` |
+| `unknown`（light mode） | 先试 `[{"op":"upscale","params":{"scale":2.0}},{"op":"sharpen","params":{"strength":2.0}}]` |
 
-### 问题排查流
+增强后仍失败 → 把 `suggestion` 翻译成自然语言告诉用户。
 
-1. "帮我读这个二维码" → 返回 `RETRYABLE: too_blur`
-2. "太模糊了。裁剪到二维码区域，放大+锐化后重试" → 返回 `SUCCESS`
-3. "好的，二维码内容是 https://example.com/register"
+### `NO_QR_FOUND`
+图片中没找到二维码。把 `analysis.primary_issue` 和 `suggestion` 翻译成自然语言告诉用户。
+- `too_blur` → "图片太模糊了，换个角度拍"
+- `too_dark` → "光线不够，开灯或换个亮的地方"
+- `no_qr` → "图片里没有二维码"
 
-### 批量处理
+### `QR_UNRECOVERABLE`
+二维码找到了但**无法解码**。告诉用户二维码可能损坏，或使用了不支持的编码格式。
 
-1. "我有 5 张二维码截图，全部读出来"
-2. "哪些失败了？把失败的增强后再试"
-3. "汇总所有解码出的 URL"
+## 增强操作的组合顺序
 
-### 质量审计
+有效的组合模式：
+- **太小看不清**：`upscale → sharpen`
+- **模糊**：`sharpen` 单用或叠 `upscale`
+- **太暗/对比度低**：`adjust_contrast` 单用
+- **噪点多**：`denoise → sharpen`
 
-- "扫描这个二维码，告诉我图片质量——够清晰吗？"
-- "解码之前先检查这张照片是不是太暗了"
-- "用户反映扫不出这个码，帮我分析一下图片质量"
+最多 5 步，参数会被自动 clamp 到安全范围，不需要手动算。
+
+## 批量处理
+
+多张图片时每张独立调用 `decode_qrcode_full`。单张内多个二维码不需要额外操作——一次调用返回全部。
+失败的重试用同一流程，不要合并不同图片的结果。

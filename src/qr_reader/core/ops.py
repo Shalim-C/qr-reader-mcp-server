@@ -59,10 +59,9 @@ def load_image_bytes(img_bytes: bytes, max_long_edge: int = 2560) -> np.ndarray:
     """
     if _CV2_AVAILABLE:
         import cv2
-        from PIL import Image
-        from io import BytesIO
-        img = Image.open(BytesIO(img_bytes)).convert("RGB")
-        arr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        arr = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if arr is None:
+            raise ValueError("Failed to decode image — unsupported format or corrupt data")
         h, w = arr.shape[:2]
         longer = max(h, w)
         if longer > max_long_edge:
@@ -85,22 +84,43 @@ def load_image_bytes(img_bytes: bytes, max_long_edge: int = 2560) -> np.ndarray:
         return np.array(img)
 
 
-def image_to_bytes(arr: np.ndarray, fmt: str = "png") -> bytes:
+def image_to_bytes(arr: np.ndarray, fmt: str = "png", channel_order: str = "auto") -> bytes:
     """Encode a numpy image array to bytes (PNG/JPEG).
 
-    Accepts both RGB and BGR — auto-detects from channel order heuristic.
+    Args:
+        arr: H×W×C image array.
+        fmt: Output format — "png" or "jpg".
+        channel_order: "bgr", "rgb", or "auto" (default).
+            "auto" heuristically detects BGR by comparing blue vs red
+            channel means in the center region.
     """
+    if channel_order == "auto":
+        if arr.ndim == 3 and arr.shape[2] >= 3:
+            h, w = arr.shape[:2]
+            # Sample center 25% of the image
+            cy, cx = h // 2, w // 2
+            ch, cw = max(h // 4, 1), max(w // 4, 1)
+            center = arr[cy - ch:cy + ch, cx - cw:cx + cw, :3]
+            # BGR heuristic: blue channel tends to be dimmer than red
+            # when the image is a real-world photo (sky, faces, etc.).
+            # For QR codes this is unreliable, so default to RGB if close.
+            b_mean = center[:, :, 0].mean()
+            r_mean = center[:, :, 2].mean()
+            channel_order = "bgr" if r_mean > b_mean * 1.1 else "rgb"
+        else:
+            channel_order = "rgb"
+
     if _CV2_AVAILABLE:
         import cv2
-        import base64
+        if channel_order == "rgb":
+            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
         _, buf = cv2.imencode(f".{fmt}", arr)
         return buf.tobytes()
     else:
         _ensure_pillow()
         from io import BytesIO
-        # Pillow expects RGB; cv2 path produces BGR so convert if needed.
-        # Heuristic: if the array has 3 channels and the blue channel
-        # tends to be dimmer than red in the center, it's BGR.
+        if channel_order == "bgr":
+            arr = arr[:, :, ::-1]  # BGR → RGB
         img = _PIL_IMAGE.fromarray(arr)
         buf = BytesIO()
         img.save(buf, format=fmt.upper() if fmt != "jpg" else "JPEG")
@@ -122,16 +142,16 @@ def laplacian_variance(arr: np.ndarray) -> float:
         gray = _to_gray(arr)
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-    # Pure numpy fallback
-    gray = _to_gray(arr)
-    # 3×3 Laplacian kernel
+    # Pure numpy fallback — vectorized 3×3 convolution
+    gray = _to_gray(arr).astype(np.float64)
     kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float64)
     h, w = gray.shape
-    # Simple convolution via slicing (boundary pixels skipped)
+    # Extract overlapping 3×3 patches via slicing (vectorized)
     lap = np.zeros((h - 2, w - 2), dtype=np.float64)
     for dy in range(3):
         for dx in range(3):
-            lap += kernel[dy, dx] * gray[dy:dy + h - 2, dx:dx + w - 2].astype(np.float64)
+            if kernel[dy, dx] != 0:
+                lap += kernel[dy, dx] * gray[dy:dy + h - 2, dx:dx + w - 2]
     return float(lap.var())
 
 
@@ -180,20 +200,51 @@ def op_upscale(arr: np.ndarray, scale: float) -> np.ndarray:
 
 
 def op_sharpen(arr: np.ndarray, strength: float) -> np.ndarray:
-    """Sharpen with custom kernel. strength ∈ [0.3, 5.0]."""
+    """Sharpen with custom kernel. strength ∈ [0.3, 5.0].
+
+    Uses the same 3×3 kernel公式 on both cv2 and Pillow paths
+    for consistent output.  The kernel is:
+
+        [-1 -1 -1]
+        [-1 9s -1] / (9s − 8)   where s = strength
+        [-1 -1 -1]
+
+    A singularity exists at s ≈ 0.8889 where the denominator → 0;
+    callers must guard this (server._validate_enhance_params handles it).
+    """
+    denom = 9 * strength - 8
+    kernel = np.array([[-1, -1, -1], [-1, 9 * strength, -1], [-1, -1, -1]], dtype=np.float32) / denom
+
     if _CV2_AVAILABLE:
         import cv2
-        denom = 9 * strength - 8
-        kernel = np.array([[-1, -1, -1], [-1, 9 * strength, -1], [-1, -1, -1]]) / denom
         return cv2.filter2D(arr, -1, kernel)
+
+    # Pillow fallback — same kernel via numpy convolution
     _ensure_pillow()
-    img = _PIL_IMAGE.fromarray(arr)
-    # Pillow SHARPEN filter, then blend with original to control strength
-    sharpened = img.filter(_PIL_IMAGE_FILTER.SHARPEN)
-    # Blend: strength 1.0 = original, 2.0 = full sharpened
-    alpha = min((strength - 0.3) / 1.5, 1.0)  # map [0.3, 1.8] → [0, 1]
-    blended = _PIL_IMAGE.blend(img, sharpened, alpha)
-    return np.array(blended)
+    if arr.ndim == 3:
+        # Per-channel convolution
+        result = np.zeros_like(arr, dtype=np.float32)
+        for c in range(arr.shape[2]):
+            ch = arr[:, :, c].astype(np.float32)
+            h, w = ch.shape
+            padded = np.pad(ch, 1, mode='edge')
+            conv = np.zeros_like(ch)
+            for dy in range(3):
+                for dx in range(3):
+                    if kernel[dy, dx] != 0:
+                        conv += kernel[dy, dx] * padded[dy:dy + h, dx:dx + w]
+            result[:, :, c] = np.clip(conv, 0, 255)
+        return result.astype(np.uint8)
+    else:
+        ch = arr.astype(np.float32)
+        h, w = ch.shape
+        padded = np.pad(ch, 1, mode='edge')
+        conv = np.zeros_like(ch)
+        for dy in range(3):
+            for dx in range(3):
+                if kernel[dy, dx] != 0:
+                    conv += kernel[dy, dx] * padded[dy:dy + h, dx:dx + w]
+        return np.clip(conv, 0, 255).astype(arr.dtype)
 
 
 def op_contrast(arr: np.ndarray, alpha: float, beta: float = 0) -> np.ndarray:
@@ -227,11 +278,17 @@ def op_denoise(arr: np.ndarray, h: int) -> np.ndarray:
 # QR detection / decode (cv2 only; unavailable in light mode)
 # ---------------------------------------------------------------------------
 
-def qr_detect(arr: np.ndarray) -> bool:
-    """Detect QR finder patterns. Returns False in light mode."""
+def qr_detect(arr: np.ndarray) -> bool | None:
+    """Detect QR finder patterns.
+
+    Returns:
+        True  — finder patterns found
+        False — no finder patterns detected
+        None  — detection unavailable (light mode, no cv2)
+    """
     if not _CV2_AVAILABLE:
         logger.debug("QR detection unavailable (cv2 not installed)")
-        return False
+        return None
     import cv2
     gray = _to_gray(arr)
     detector = cv2.QRCodeDetector()
