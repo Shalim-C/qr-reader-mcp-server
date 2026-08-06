@@ -10,6 +10,7 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12"]
@@ -28,11 +29,7 @@ jobs:
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
-        run: |
-          # libzbar0 on Windows via vcpkg — pre-installed on GitHub runners
-          vcpkg install zbar:x64-windows
-          # Let Python find the DLL
-          echo "C:/vcpkg/installed/x64-windows/bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        run: choco install zbar --no-progress -y
 
       - name: Install Python dependencies
         run: |
