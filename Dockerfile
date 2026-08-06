@@ -6,13 +6,9 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY src/ src/
 COPY pyproject.toml .
-
-RUN pip install --no-cache-dir -e .
+COPY src/ src/
+RUN pip install --no-cache-dir .
 
 ENV LOG_LEVEL=info
 ENV READ_ONLY_MODE=false

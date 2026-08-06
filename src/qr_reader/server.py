@@ -21,6 +21,7 @@ from mcp.types import Tool, TextContent
 from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region
 from qr_reader.core.diagnosis import classify_result
 from qr_reader.core.quality import analyze_image_quality
+from qr_reader.core.url_utils import is_private_url
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -29,6 +30,9 @@ from qr_reader.core.quality import analyze_image_quality
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").lower()
 READ_ONLY_MODE = os.getenv("READ_ONLY_MODE", "false").lower() == "true"
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "10485760"))  # 10 MB
+MAX_INPUT_PIXELS = int(os.getenv("MAX_INPUT_PIXELS", "1920"))  # auto-resize limit
+
+_ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff"}
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
@@ -44,19 +48,36 @@ app = Server("qr-reader-mcp-server")
 # ---------------------------------------------------------------------------
 
 def load_image(
+    image_path: str | None = None,
     image_base64: str | None = None,
     image_url: str | None = None,
 ) -> np.ndarray:
-    """Load an image from base64 string or URL, returning a BGR ndarray."""
-    if image_base64:
+    """Load an image from local path, base64 string, or URL.
+
+    Priority: image_path > image_base64 > image_url.
+    Returns a BGR ndarray.
+    """
+    if image_path:
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext not in _ALLOWED_IMAGE_EXT:
+            raise ValueError(
+                f"不支持的文件类型: {ext}，仅允许 {sorted(_ALLOWED_IMAGE_EXT)}"
+            )
+        if not os.path.isfile(image_path):
+            raise ValueError(f"图片文件不存在: {image_path}")
+        with open(image_path, "rb") as f:
+            img_bytes = f.read()
+    elif image_base64:
         img_bytes = base64.b64decode(image_base64)
     elif image_url:
+        if is_private_url(image_url):
+            raise ValueError("image_url 不允许指向内网/私有地址")
         logger.info("Fetching image from URL: %s", image_url[:120])
         resp = requests.get(image_url, timeout=10)
         resp.raise_for_status()
         img_bytes = resp.content
     else:
-        raise ValueError("必须提供 image_base64 或 image_url")
+        raise ValueError("必须提供 image_path、image_base64 或 image_url 之一")
 
     if len(img_bytes) > MAX_IMAGE_SIZE:
         raise ValueError(
@@ -64,7 +85,18 @@ def load_image(
         )
 
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+    # ── auto-resize: keep longest edge ≤ MAX_INPUT_PIXELS ──────────
+    h, w = img.shape[:2]
+    longer = max(h, w)
+    if longer > MAX_INPUT_PIXELS:
+        scale = MAX_INPUT_PIXELS / longer
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        logger.info("Auto-resized %dx%d → %dx%d (limit=%dpx)", w, h, new_w, new_h, MAX_INPUT_PIXELS)
+
+    return img
 
 
 def image_to_base64(img: np.ndarray) -> str:
@@ -175,7 +207,10 @@ TOOL_SCHEMAS = [
                 },
                 "operations": {
                     "type": "array",
-                    "description": "增强操作列表，按顺序执行",
+                    "description": (
+                        "增强操作列表，按顺序执行。"
+                        "不传则仅裁剪目标区域后直接解码（无增强）。"
+                    ),
                     "items": {
                         "type": "object",
                         "properties": {
@@ -197,7 +232,7 @@ TOOL_SCHEMAS = [
                     },
                 },
             },
-            "required": ["bbox", "operations"],
+            "required": ["bbox"],
         },
     ),
 ]
@@ -224,6 +259,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "decode_qrcode_full":
         try:
             img = load_image(
+                image_path=arguments.get("image_path"),
                 image_base64=arguments.get("image_base64"),
                 image_url=arguments.get("image_url"),
             )
@@ -251,6 +287,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         try:
             img = load_image(
+                image_path=arguments.get("image_path"),
                 image_base64=arguments.get("image_base64"),
                 image_url=arguments.get("image_url"),
             )
@@ -264,19 +301,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if not bbox or len(bbox) != 4:
             return _error("INVALID_BBOX", "bbox 必须为 [x, y, width, height]")
 
-        x, y, w, h = bbox
-        x, y = max(0, x), max(0, y)
-        w = min(w, img.shape[1] - x)
-        h = min(h, img.shape[0] - y)
+        # 无增强操作 → 直接裁剪解码（复用 decode_qr_from_region）
+        if not operations:
+            results = decode_qr_from_region(img, bbox)
+            classify_img = img  # 质量分析基于原图
+        else:
+            # 有增强操作 → 裁剪→增强→解码
+            x, y, w, h = bbox
+            x, y = max(0, x), max(0, y)
+            w = min(w, img.shape[1] - x)
+            h = min(h, img.shape[0] - y)
 
-        if w <= 0 or h <= 0:
-            return _error("INVALID_BBOX", "裁剪区域无效（宽/高 ≤ 0）")
+            if w <= 0 or h <= 0:
+                return _error("INVALID_BBOX", "裁剪区域无效（宽/高 ≤ 0）")
 
-        roi = img[y:y + h, x:x + w]
-        enhanced = apply_operations(roi, operations)
-        results = decode_qr_from_image(enhanced)
+            roi = img[y:y + h, x:x + w]
+            enhanced = apply_operations(roi, operations)
+            results = decode_qr_from_image(enhanced)
+            classify_img = enhanced  # 质量分析基于增强后的图
         qr_detected = len(results) > 0
-        info = classify_result(enhanced, qr_detected, len(results) > 0, results)
+        info = classify_result(classify_img, qr_detected, len(results) > 0, results)
 
         response = {
             "success": info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING"),

@@ -1,7 +1,7 @@
 [project]
 name = "qr-reader-mcp-server"
 version = "0.1.0"
-description = "An MCP server that decodes QR codes from images — returns structured diagnostics so AI agents can self-correct on failure."
+description = "An MCP server that decodes QR codes from images — returns detailed quality metrics and failure reasons so AI agents can self-correct."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -16,7 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.2.0",
     "opencv-python>=4.9.0",
     "pyzbar>=0.1.9",
     "Pillow>=10.0.0",
@@ -32,7 +32,7 @@ dev = [
 ]
 
 [project.scripts]
-qr-reader-mcp = "qr_reader.server:main"
+qr-reader-mcp = "qr_reader.server:cli"
 
 [build-system]
 requires = ["setuptools>=68.0"]

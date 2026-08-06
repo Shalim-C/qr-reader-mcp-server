@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 from qr_reader.core.decoder import (
     decode_qr_from_image,
-    detect_qr_positions,
     decode_qr_from_region,
 )
 
@@ -72,17 +71,6 @@ class TestDecodeQrFromImage:
         assert results[0]["content"] is None
 
 
-class TestDetectQrPositions:
-    def test_returns_positions_not_content(self, mocker):
-        fake = FakeDecoded("secret", "QRCODE", 10, 20, 100, 200)
-        mocker.patch("qr_reader.core.decoder.pyzbar.decode", return_value=[fake])
-        img = np.zeros((300, 300, 3), dtype=np.uint8)
-        positions = detect_qr_positions(img)
-        assert len(positions) == 1
-        assert "content" not in positions[0]
-        assert positions[0]["bbox"] == [10, 20, 100, 200]
-
-
 class TestDecodeQrFromRegion:
     def test_crops_and_decodes(self, mocker):
         fake = FakeDecoded("cropped-content", "QRCODE")
@@ -99,3 +87,12 @@ class TestDecodeQrFromRegion:
         # bbox extends beyond image — should be clamped
         results = decode_qr_from_region(img, [-10, -10, 200, 200])
         assert len(results) == 1
+
+    def test_empty_operations_list_is_allowed(self, mocker):
+        """无增强操作时也应正常工作（仅裁剪+解码）。"""
+        fake = FakeDecoded("plain-crop", "QRCODE")
+        mocker.patch("qr_reader.core.decoder.pyzbar.decode", return_value=[fake])
+        img = np.zeros((100, 100, 3), dtype=np.uint8)
+        results = decode_qr_from_region(img, [0, 0, 50, 50])
+        assert len(results) == 1
+        assert results[0]["content"] == "plain-crop"

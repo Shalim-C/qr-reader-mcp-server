@@ -30,22 +30,6 @@ def decode_qr_from_image(img: np.ndarray) -> list[dict]:
     return results
 
 
-def detect_qr_positions(img: np.ndarray) -> list[dict]:
-    """Detect QR code bounding boxes without decoding content.
-
-    Returns:
-        List of dicts with keys: bbox, type.
-    """
-    positions: list[dict] = []
-    decoded_objects = pyzbar.decode(img)
-    for obj in decoded_objects:
-        if obj.type not in ("QRCODE", "QR_CODE"):
-            continue
-        x, y, w, h = obj.rect
-        positions.append({"bbox": [x, y, w, h], "type": obj.type})
-    return positions
-
-
 def decode_qr_from_region(img: np.ndarray, bbox: list[int]) -> list[dict]:
     """Decode QR codes from a cropped region of the image.
 
