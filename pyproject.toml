@@ -16,7 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "mcp>=1.10.0",
+    "mcp>=1.28.0",
     "Pillow>=10.0.0",
     "numpy>=1.26.0",
     "requests>=2.31.0",
