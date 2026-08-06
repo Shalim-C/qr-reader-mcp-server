@@ -67,7 +67,7 @@ jobs:
           pip install -e ".[bench]"
 
       - name: Run benchmarks
-        run: python -m pytest tests/bench/ -v --benchmark-only --benchmark-json=benchmark.json
+        run: python -m pytest benchmarks/ -v --benchmark-only --benchmark-json=benchmark.json
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
