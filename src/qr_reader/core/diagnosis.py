@@ -30,13 +30,13 @@ THRESHOLDS = {
 def _check_warning(content: str | None) -> dict | None:
     """Inspect decoded content for quality warnings."""
     if content is None or content == "":
-        return {"warning": "empty_content", "detail": "二维码有效但内容为空"}
+        return {"warning": "empty_content", "detail": "QR code is valid but contains no data"}
     try:
         content.encode("utf-8")
     except UnicodeEncodeError:
-        return {"warning": "garbled", "detail": "内容包含非UTF-8字符，可能为二进制数据或乱码"}
+        return {"warning": "garbled", "detail": "Content contains non-UTF-8 characters, possibly binary data or garbled text"}
     if any(ord(c) < 32 and c not in "\n\r\t" for c in content):
-        return {"warning": "garbled", "detail": "内容包含不可打印字符，可能解码异常"}
+        return {"warning": "garbled", "detail": "Content contains non-printable characters, decoding may be corrupt"}
     return None
 
 
@@ -77,18 +77,18 @@ def classify_result(
             return {
                 "result_code": "NO_QR_FOUND",
                 "analysis": {"primary_issue": "too_blur", "quality": quality},
-                "suggestion": "图像过于模糊，无法定位二维码，建议重新拍摄",
+                "suggestion": "Image is too blurry to locate QR codes — try re-shooting with better focus",
             }
         if is_low_contrast(quality["contrast"]):
             return {
                 "result_code": "NO_QR_FOUND",
                 "analysis": {"primary_issue": "too_dark", "quality": quality},
-                "suggestion": "图像对比度过低，建议调整光线后重新拍摄",
+                "suggestion": "Image contrast is too low — try adjusting lighting and re-shooting",
             }
         return {
             "result_code": "NO_QR_FOUND",
             "analysis": {"primary_issue": "no_qr", "quality": quality},
-            "suggestion": "图中未检测到二维码，请确认图片内容",
+            "suggestion": "No QR code detected in the image — verify the image contains a QR code",
         }
 
     # -- QR found but could not decode --------------------------------------
@@ -97,24 +97,24 @@ def classify_result(
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "blur", "quality": quality},
-                "suggestion": "二维码区域模糊，建议裁剪放大后重试",
+                "suggestion": "QR code region is blurry — try cropping and enlarging, then retry with enhance_and_decode",
             }
         if has_glare(quality["glare_ratio"]):
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "glare", "quality": quality},
-                "suggestion": "反光覆盖二维码区域，建议调整角度后重试",
+                "suggestion": "Glare is covering the QR code — try adjusting the shooting angle and retry",
             }
         if is_low_contrast(quality["contrast"]):
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "low_contrast", "quality": quality},
-                "suggestion": "对比度不足，建议调整光线后重试",
+                "suggestion": "Insufficient contrast — try adjusting lighting and retry",
             }
         return {
             "result_code": "QR_UNRECOVERABLE",
             "analysis": {"primary_issue": "invalid_encoding", "quality": quality},
-            "suggestion": "图像清晰但解码仍失败，二维码可能已损坏或编码无效",
+            "suggestion": "Image is clear but decoding still failed — QR code may be damaged or use an unsupported encoding",
         }
 
     # -- Success (possibly with warnings) -----------------------------------

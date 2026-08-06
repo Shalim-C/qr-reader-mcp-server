@@ -113,8 +113,9 @@ python -m qr_reader.server
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `image_base64` | string | 二选一 | Base64 编码的图片 |
-| `image_url` | string | 二选一 | 图片 URL |
+| `image_path` | string | 三选一 | 本地图片绝对路径（推荐——无管道开销） |
+| `image_base64` | string | 三选一 | Base64 编码的图片 |
+| `image_url` | string | 三选一 | 图片 URL |
 
 **返回示例：**
 
@@ -130,7 +131,7 @@ python -m qr_reader.server
       "raw_bytes": "..."
     }
   ],
-  "diagnosis": {
+  "analysis": {
     "total_detected": 1,
     "quality": {
       "blur_score": 128.5,
@@ -151,10 +152,11 @@ python -m qr_reader.server
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `image_base64` | string | 二选一 | Base64 编码的图片 |
-| `image_url` | string | 二选一 | 图片 URL |
+| `image_path` | string | 三选一 | 本地图片绝对路径（推荐——无管道开销） |
+| `image_base64` | string | 三选一 | Base64 编码的图片 |
+| `image_url` | string | 三选一 | 图片 URL |
 | `bbox` | [int,int,int,int] | 是 | 目标区域 `[x, y, width, height]` |
-| `operations` | object[] | 是 | 增强操作列表（见下方） |
+| `operations` | object[] | 否 | 增强操作列表（见下方），不传则仅裁剪解码 |
 
 **增强操作：**
 
@@ -239,12 +241,15 @@ qr-reader-mcp-server/
 │           ├── __init__.py
 │           ├── decoder.py     # 二维码解码（基于 pyzbar）
 │           ├── quality.py     # 图像质量分析
-│           └── diagnosis.py   # 结果分类与详情提取
+│           ├── diagnosis.py   # 结果分类与详情提取
+│           └── url_utils.py   # SSRF 防护
 └── tests/
     ├── __init__.py
     ├── test_decoder.py
     ├── test_diagnosis.py
-    └── test_quality.py
+    ├── test_quality.py
+    ├── test_server.py
+    └── test_ssrf.py
 ```
 
 ---

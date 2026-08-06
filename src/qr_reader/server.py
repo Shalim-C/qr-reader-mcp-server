@@ -61,27 +61,27 @@ def load_image(
         ext = os.path.splitext(image_path)[1].lower()
         if ext not in _ALLOWED_IMAGE_EXT:
             raise ValueError(
-                f"不支持的文件类型: {ext}，仅允许 {sorted(_ALLOWED_IMAGE_EXT)}"
+                f"Unsupported file type: {ext}, only {sorted(_ALLOWED_IMAGE_EXT)} are allowed"
             )
         if not os.path.isfile(image_path):
-            raise ValueError(f"图片文件不存在: {image_path}")
+            raise ValueError(f"Image file not found: {image_path}")
         with open(image_path, "rb") as f:
             img_bytes = f.read()
     elif image_base64:
         img_bytes = base64.b64decode(image_base64)
     elif image_url:
         if is_private_url(image_url):
-            raise ValueError("image_url 不允许指向内网/私有地址")
+            raise ValueError("image_url must not point to internal/private addresses")
         logger.info("Fetching image from URL: %s", image_url[:120])
         resp = requests.get(image_url, timeout=10)
         resp.raise_for_status()
         img_bytes = resp.content
     else:
-        raise ValueError("必须提供 image_path、image_base64 或 image_url 之一")
+        raise ValueError("Must provide one of image_path, image_base64, or image_url")
 
     if len(img_bytes) > MAX_IMAGE_SIZE:
         raise ValueError(
-            f"图片大小 {len(img_bytes)} bytes 超过上限 {MAX_IMAGE_SIZE} bytes"
+            f"Image size {len(img_bytes)} bytes exceeds limit of {MAX_IMAGE_SIZE} bytes"
         )
 
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -183,11 +183,11 @@ TOOL_SCHEMAS = [
     Tool(
         name="decode_qrcode_full",
         description=(
-            "对整张图片进行二维码识别和解码。返回所有检测结果及详情信息。"
-            "Agent 应根据 result_code 决定下一步："
-            "SUCCESS → 使用内容；SUCCESS_WITH_WARNING → 检查警告；"
-            "RETRYABLE → 调用 enhance_and_decode；"
-            "NO_QR_FOUND / QR_UNRECOVERABLE → 告知用户。"
+            "Scan the entire image for QR codes and decode them. Returns all detected codes with detailed diagnostics."
+            "Agent should decide next step based on result_code:"
+            "SUCCESS → use content; SUCCESS_WITH_WARNING → check warnings;"
+            "RETRYABLE → call enhance_and_decode;"
+            "NO_QR_FOUND / QR_UNRECOVERABLE → inform user."
         ),
         inputSchema={
             "type": "object",
@@ -195,21 +195,21 @@ TOOL_SCHEMAS = [
                 "image_path": {
                     "type": "string",
                     "description": (
-                        "本地图片绝对路径——优先使用（如有）。"
-                        "直接传路径字符串，零管道开销，不会超时。"
+                        "Local image absolute path — preferred when available."
+                        "Pass the path string directly — zero pipe overhead, no timeout."
                     ),
                 },
                 "image_base64": {
                     "type": "string",
                     "description": (
-                        "Base64 编码的图片。图片在内存中、"
-                        "或无法获取本地路径时使用。大图会自动缩放。"
+                        "Base64-encoded image. Use when the image is in memory or "
+                        "when a local path is unavailable. Large images are auto-resized."
                     ),
                 },
                 "image_url": {
                     "type": "string",
                     "description": (
-                        "图片公网 URL。图片在服务器可访问的远程位置时使用。"
+                        "Public image URL. Use when the image is at a remote location accessible by the server."
                     ),
                 },
             },
@@ -218,36 +218,36 @@ TOOL_SCHEMAS = [
     Tool(
         name="enhance_and_decode",
         description=(
-            "对图片指定区域执行增强操作后解码。"
-            "增强策略由 Agent 根据 decode_qrcode_full 返回的详情自行决定。"
-            "支持 upscale(放大)、sharpen(锐化)、"
-            "adjust_contrast(调对比度)、denoise(降噪)，可组合使用。"
+            "Apply enhancement operations to a region of the image, then decode."
+            "Enhancement strategy is decided by the Agent based on decode_qrcode_full diagnostics."
+            "Supports upscale, sharpen, "
+            "adjust_contrast, denoise — composable in any order."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "image_path": {
                     "type": "string",
-                    "description": "本地图片绝对路径——优先使用（如有）。",
+                    "description": "Local image absolute path — preferred when available.",
                 },
                 "image_base64": {
                     "type": "string",
-                    "description": "Base64 编码的图片——图片在内存中时使用。大图会自动缩放。",
+                    "description": "Base64-encoded image — use when the image is in memory. Large images are auto-resized.",
                 },
                 "image_url": {
                     "type": "string",
-                    "description": "图片公网 URL——图片在远程位置时使用。",
+                    "description": "Public image URL — use when the image is at a remote location.",
                 },
                 "bbox": {
                     "type": "array",
                     "items": {"type": "integer"},
-                    "description": "目标区域 [x, y, width, height]",
+                    "description": "Target region [x, y, width, height]",
                 },
                 "operations": {
                     "type": "array",
                     "description": (
-                        "增强操作列表，按顺序执行。"
-                        "不传则仅裁剪目标区域后直接解码（无增强）。"
+                        "List of enhancement operations, applied in order."
+                        "If omitted, crops the region and decodes directly (no enhancement)."
                     ),
                     "items": {
                         "type": "object",
@@ -263,7 +263,7 @@ TOOL_SCHEMAS = [
                             },
                             "params": {
                                 "type": "object",
-                                "description": "操作参数（可选）",
+                                "description": "Operation parameters (optional)",
                             },
                         },
                         "required": ["op"],
@@ -321,7 +321,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     # ── enhance_and_decode ────────────────────────────────────────────────
     if name == "enhance_and_decode":
         if READ_ONLY_MODE:
-            return _error("READ_ONLY_MODE", "enhance_and_decode 在只读模式下不可用")
+            return _error("READ_ONLY_MODE", "enhance_and_decode is unavailable in read-only mode")
 
         try:
             img = load_image(
@@ -339,22 +339,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if not bbox or len(bbox) != 4:
             return _error("INVALID_BBOX", "bbox 必须为 [x, y, width, height]")
 
-        # 无增强操作 → 直接裁剪解码（复用 decode_qr_from_region）
+        # No enhancement → crop and decode directly (reuse decode_qr_from_region)
         if not operations:
             results = decode_qr_from_region(img, bbox)
             x, y, w, h = clamp_bbox(bbox, img.shape)
             classify_img = img[y:y + h, x:x + w] if w > 0 and h > 0 else img
         else:
-            # 有增强操作 → 裁剪→增强→解码
+            # With enhancement → crop → enhance → decode
             x, y, w, h = clamp_bbox(bbox, img.shape)
 
             if w <= 0 or h <= 0:
-                return _error("INVALID_BBOX", "裁剪区域无效（宽/高 ≤ 0）")
+                return _error("INVALID_BBOX", "Invalid crop region (width/height ≤ 0)")
 
             roi = img[y:y + h, x:x + w]
             enhanced = apply_operations(roi, operations)
             results = decode_qr_from_image(enhanced)
-            classify_img = enhanced  # 质量分析基于增强后的图
+            classify_img = enhanced  # Quality analysis based on enhanced image
         qr_detected = detect_qr_regions(classify_img)
         info = classify_result(classify_img, qr_detected, len(results) > 0, results)
 
@@ -370,7 +370,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         )
         return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
 
-    return _error("UNKNOWN_TOOL", f"未知工具: {name}")
+    return _error("UNKNOWN_TOOL", f"Unknown tool: {name}")
 
 
 # ---------------------------------------------------------------------------
