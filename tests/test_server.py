@@ -19,7 +19,7 @@ from qr_reader.server import (
     _error,
     TOOL_SCHEMAS,
     apply_operations,
-    image_to_base64,
+    img_to_base64,
     load_image,
 )
 
@@ -189,10 +189,10 @@ class TestApplyOperations:
 # image_to_base64
 # ---------------------------------------------------------------------------
 
-class TestImageToBase64:
+class TestImgToBase64:
     def test_roundtrip(self):
         img = np.zeros((10, 10, 3), dtype=np.uint8)
-        b64 = image_to_base64(img)
+        b64 = img_to_base64(img)
         decoded = base64.b64decode(b64)
         assert len(decoded) > 0
         # Re-load to verify valid PNG

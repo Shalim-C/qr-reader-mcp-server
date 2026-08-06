@@ -15,8 +15,8 @@ from qr_reader.core.decoder import (
     decode_qr_from_image,
     decode_qr_from_region,
     detect_qr_regions,
-    _points_to_bbox,
 )
+from qr_reader.core.ops import _points_to_bbox
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ class TestDecodeQrFromImagePyzbar:
         """Pyzbar returns [] → OpenCV fallback kicks in."""
         monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", True)
         mocker.patch("qr_reader.core.decoder._decode_with_pyzbar", return_value=[])
-        mocker.patch("qr_reader.core.decoder._decode_with_opencv",
+        mocker.patch("qr_reader.core.ops.qr_decode_opencv",
                       return_value=[_fake_result("opencv-fallback")])
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         results = decode_qr_from_image(img)
@@ -106,7 +106,7 @@ class TestDecodeQrFromImagePyzbar:
 class TestDecodeQrFromImageOpencv:
     def test_opencv_used_when_pyzbar_unavailable(self, mocker, monkeypatch):
         monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", False)
-        mocker.patch("qr_reader.core.decoder._decode_with_opencv",
+        mocker.patch("qr_reader.core.ops.qr_decode_opencv",
                       return_value=[_fake_result("opencv-only")])
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         results = decode_qr_from_image(img)
@@ -115,7 +115,7 @@ class TestDecodeQrFromImageOpencv:
 
     def test_opencv_empty_when_nothing_found(self, mocker, monkeypatch):
         monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", False)
-        mocker.patch("qr_reader.core.decoder._decode_with_opencv", return_value=[])
+        mocker.patch("qr_reader.core.ops.qr_decode_opencv", return_value=[])
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         results = decode_qr_from_image(img)
         assert results == []
@@ -154,23 +154,17 @@ class TestDecodeQrFromRegion:
 
 class TestDetectQrRegions:
     def test_detected_when_finder_patterns_found(self, mocker):
-        mock_detector = mocker.MagicMock()
-        mock_detector.detect.return_value = (True, None)
-        mocker.patch("qr_reader.core.decoder._qr_detector", mock_detector)
+        mocker.patch("qr_reader.core.ops.qr_detect", return_value=True)
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         assert detect_qr_regions(img) is True
 
     def test_not_detected_when_nothing_found(self, mocker):
-        mock_detector = mocker.MagicMock()
-        mock_detector.detect.return_value = (False, None)
-        mocker.patch("qr_reader.core.decoder._qr_detector", mock_detector)
+        mocker.patch("qr_reader.core.ops.qr_detect", return_value=False)
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         assert detect_qr_regions(img) is False
 
     def test_accepts_grayscale_input(self, mocker):
-        mock_detector = mocker.MagicMock()
-        mock_detector.detect.return_value = (True, None)
-        mocker.patch("qr_reader.core.decoder._qr_detector", mock_detector)
+        mocker.patch("qr_reader.core.ops.qr_detect", return_value=True)
         gray = np.zeros((100, 100), dtype=np.uint8)
         assert detect_qr_regions(gray) is True
 

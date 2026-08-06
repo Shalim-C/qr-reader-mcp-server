@@ -3,6 +3,9 @@
 Provides two tools for AI agents:
   decode_qrcode_full  — full-image decode with quality diagnostics
   enhance_and_decode  — region-based enhancement pipeline + decode
+
+In light mode (no opencv-python), all functionality is preserved —
+enhance operations fall back to Pillow, quality metrics use pure numpy.
 """
 
 import base64
@@ -10,10 +13,9 @@ import io
 import json
 import logging
 import os
-import cv2
+
 import numpy as np
 import requests
-from PIL import Image
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
@@ -22,6 +24,15 @@ from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region, 
 from qr_reader.core.diagnosis import classify_result
 from qr_reader.core.quality import analyze_image_quality
 from qr_reader.core.url_utils import is_private_url
+from qr_reader.core.ops import (
+    load_image_bytes,
+    image_to_bytes,
+    op_upscale,
+    op_sharpen,
+    op_contrast,
+    op_denoise,
+    is_cv2_available,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -44,7 +55,7 @@ app = Server("qr-reader-mcp-server")
 
 
 # ---------------------------------------------------------------------------
-# Image loading / encoding
+# Image loading
 # ---------------------------------------------------------------------------
 
 def load_image(
@@ -55,7 +66,9 @@ def load_image(
     """Load an image from local path, base64 string, or URL.
 
     Priority: image_path > image_base64 > image_url.
-    Returns a BGR ndarray.
+    Returns an RGB ndarray (cv2 path returns BGR; light mode returns RGB).
+    Calling code should be agnostic to channel order — both work with the
+    unified ops layer.
     """
     if image_path:
         ext = os.path.splitext(image_path)[1].lower()
@@ -84,24 +97,12 @@ def load_image(
             f"Image size {len(img_bytes)} bytes exceeds limit of {MAX_IMAGE_SIZE} bytes"
         )
 
-    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-
-    # ── auto-resize: keep longest edge ≤ MAX_INPUT_PIXELS ──────────
-    h, w = img.shape[:2]
-    longer = max(h, w)
-    if longer > MAX_INPUT_PIXELS:
-        scale = MAX_INPUT_PIXELS / longer
-        new_w, new_h = int(w * scale), int(h * scale)
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        logger.info("Auto-resized %dx%d → %dx%d (limit=%dpx)", w, h, new_w, new_h, MAX_INPUT_PIXELS)
-
-    return img
+    return load_image_bytes(img_bytes, max_long_edge=MAX_INPUT_PIXELS)
 
 
-def image_to_base64(img: np.ndarray) -> str:
-    """Encode a BGR image to PNG base64."""
-    _, buf = cv2.imencode(".png", img)
+def img_to_base64(arr: np.ndarray) -> str:
+    """Encode an image array (RGB or BGR) to PNG base64."""
+    buf = image_to_bytes(arr, fmt="png")
     return base64.b64encode(buf).decode("utf-8")
 
 
@@ -109,7 +110,7 @@ def image_to_base64(img: np.ndarray) -> str:
 # Image enhancement pipeline
 # ---------------------------------------------------------------------------
 
-# ── parameter bounds (prevents OOM / NaN / hangs) ────────────────────────
+# ── parameter bounds (prevents OOM / NaN / hangs) ───────────────────────
 _ENHANCE_BOUNDS = {
     "upscale":         {"scale":        (1.0, 8.0)},
     "sharpen":         {"strength":     (0.3, 5.0)},
@@ -131,47 +132,36 @@ def _validate_enhance_params(op: str, params: dict) -> dict:
         val = params.get(key, (lo + hi) / 2)  # default to mid-point
         cleaned[key] = max(lo, min(hi, val))
 
-    # ── sharpen singularity guard: 9*s − 8 == 0 → s ≈ 0.8889 ────────────
+    # ── sharpen singularity guard: 9*s − 8 == 0 → s ≈ 0.8889 ───────────
     if op == "sharpen":
         s = cleaned["strength"]
         if abs(9 * s - 8) < 0.08:
-            s = 0.96 if s < 0.89 else 0.82  # nudge well clear of singularity
+            s = 0.96 if s < 0.89 else 0.82
             cleaned["strength"] = s
 
     return cleaned
 
 
-def apply_operations(img: np.ndarray, operations: list[dict]) -> np.ndarray:
+def apply_operations(arr: np.ndarray, operations: list[dict]) -> np.ndarray:
     """Apply a sequence of enhancement operations in order.
 
     Parameters are clamped to safe ranges before use.
     At most _MAX_OPERATIONS steps are applied.
     """
-    result = img.copy()
+    result = arr.copy()
     for step in operations[:_MAX_OPERATIONS]:
         op = step["op"]
         raw_params = step.get("params", {})
         params = _validate_enhance_params(op, raw_params)
 
         if op == "upscale":
-            scale = params["scale"]
-            result = cv2.resize(
-                result, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC
-            )
+            result = op_upscale(result, params["scale"])
         elif op == "sharpen":
-            s = params["strength"]
-            denom = 9 * s - 8
-            kernel = np.array(
-                [[-1, -1, -1], [-1, 9 * s, -1], [-1, -1, -1]]
-            ) / denom
-            result = cv2.filter2D(result, -1, kernel)
+            result = op_sharpen(result, params["strength"])
         elif op == "adjust_contrast":
-            result = cv2.convertScaleAbs(
-                result, alpha=params["alpha"], beta=params.get("beta", 0)
-            )
+            result = op_contrast(result, params["alpha"], params.get("beta", 0))
         elif op == "denoise":
-            h = params["h"]
-            result = cv2.fastNlMeansDenoisingColored(result, None, h, h, 7, 21)
+            result = op_denoise(result, params["h"])
     return result
 
 
@@ -285,7 +275,10 @@ async def list_tools() -> list[Tool]:
     tools = [TOOL_SCHEMAS[0]]  # decode_qrcode_full is always available
     if not READ_ONLY_MODE:
         tools.append(TOOL_SCHEMAS[1])  # enhance_and_decode
-    logger.info("Listing %d tools (read_only=%s)", len(tools), READ_ONLY_MODE)
+    logger.info(
+        "Listing %d tools (read_only=%s, cv2=%s)",
+        len(tools), READ_ONLY_MODE, is_cv2_available(),
+    )
     return tools
 
 
@@ -337,24 +330,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         # Validate bbox
         if not bbox or len(bbox) != 4:
-            return _error("INVALID_BBOX", "bbox 必须为 [x, y, width, height]")
+            return _error("INVALID_BBOX", "bbox must be [x, y, width, height]")
 
-        # No enhancement → crop and decode directly (reuse decode_qr_from_region)
+        # No enhancement → crop and decode directly
         if not operations:
             results = decode_qr_from_region(img, bbox)
             x, y, w, h = clamp_bbox(bbox, img.shape)
             classify_img = img[y:y + h, x:x + w] if w > 0 and h > 0 else img
         else:
-            # With enhancement → crop → enhance → decode
             x, y, w, h = clamp_bbox(bbox, img.shape)
-
             if w <= 0 or h <= 0:
                 return _error("INVALID_BBOX", "Invalid crop region (width/height ≤ 0)")
-
             roi = img[y:y + h, x:x + w]
             enhanced = apply_operations(roi, operations)
             results = decode_qr_from_image(enhanced)
-            classify_img = enhanced  # Quality analysis based on enhanced image
+            classify_img = enhanced
+
         qr_detected = detect_qr_regions(classify_img)
         info = classify_result(classify_img, qr_detected, len(results) > 0, results)
 
@@ -409,7 +400,10 @@ def _check_prerequisites() -> None:
 # ---------------------------------------------------------------------------
 
 async def main():
-    logger.info("Starting QR Reader MCP Server (read_only=%s)", READ_ONLY_MODE)
+    logger.info(
+        "Starting QR Reader MCP Server (read_only=%s, cv2=%s)",
+        READ_ONLY_MODE, is_cv2_available(),
+    )
     _check_prerequisites()
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())

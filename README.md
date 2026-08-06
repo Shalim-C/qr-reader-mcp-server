@@ -50,10 +50,33 @@ vcpkg install zbar
 # 克隆
 git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
+```
 
-# 安装
-pip install -e .
+**两种安装方式 — 按需选择：**
 
+```bash
+# ── 轻量版（推荐给只想扫码拿结果的人）─────────────────────
+# 依赖 ≈15 MB：Pillow + numpy + pyzbar + mcp + requests
+# 功能：decode_qrcode_full + enhance_and_decode 全部保留
+#       增强管道 degrades to Pillow（denoise 效果稍弱）
+pip install -e ".[light]"
+
+# ── 全功能版（需要最强解码能力的）─────────────────────────
+# 依赖 ≈120 MB：额外包含 opencv-python
+# 功能：轻量版全部功能 + OpenCV 解码回退 + finder-pattern 检测
+pip install -e ".[full]"
+```
+
+| | 轻量版 `[light]` | 全功能版 `[full]` |
+|---|---|---|
+| 下载大小 | ~15 MB | ~120 MB |
+| decode_qrcode_full | ✅ | ✅ |
+| enhance_and_decode | ✅ | ✅（denoise 稍弱） |
+| 质量指标（blur/contrast/glare） | ✅ | ✅ |
+| OpenCV 解码回退 | ❌ | ✅ |
+| finder-pattern 检测 | ❌ | ✅ |
+
+```bash
 # 启动（stdio 模式）
 python -m qr_reader.server
 ```
