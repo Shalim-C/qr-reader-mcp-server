@@ -1,14 +1,14 @@
-# QR Reader MCP Server — 安装指南
+# QR Reader MCP Server — Install Guide
 
-以下步骤面向 AI Agent，复制全文给你的 Agent 即可自动完成安装。
+The following steps are written for AI agents. Send this link to your agent and it will handle installation automatically.
 
-## 环境要求
+## Prerequisites
 
-开始安装之前，请确保环境中已安装：
+Ensure the environment has:
 - Python 3.10+
-- libzbar（系统级依赖，pyzbar 需要）
+- libzbar (system-level dependency required by pyzbar)
 
-## 第 1 步 — 安装 libzbar
+## Step 1 — Install libzbar
 
 ```shell
 # Ubuntu / Debian
@@ -21,25 +21,25 @@ brew install zbar
 choco install zbar
 ```
 
-## 第 2 步 — 克隆仓库并安装
+## Step 2 — Clone and install
 
 ```shell
 cd /d/GitHub
 git clone --depth 1 https://githubproxy.cc/https://github.com/Shalim-C/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
 
-# 轻量版（~15 MB），功能完整
+# Light (~15 MB) — full functionality
 pip install -e ".[light]"
 
-# 全功能版（~120 MB），额外 OpenCV 解码回退
+# Full (~120 MB) — adds OpenCV decode fallback
 pip install -e ".[full]"
 ```
 
-## 第 3 步 — 注册到 MCP 客户端
+## Step 3 — Register with your MCP client
 
-根据你的客户端选择对应的配置：
+Pick the config that matches your client:
 
-**Reasonix Go（config.toml）：**
+**Reasonix Go (config.toml):**
 
 ```toml
 [[plugins]]
@@ -49,7 +49,7 @@ args    = ["-m", "qr_reader.server"]
 env     = { LOG_LEVEL = "info" }
 ```
 
-**Claude Desktop / VS Code / Cursor：**
+**Claude Desktop / VS Code / Cursor:**
 
 ```json
 {
@@ -65,18 +65,18 @@ env     = { LOG_LEVEL = "info" }
 }
 ```
 
-**uvx（如果已发布到 PyPI）：**
+**uvx (once published to PyPI):**
 
 ```shell
 uvx qr-reader-mcp-server
 ```
 
-## 第 4 步 — 重启并验证
+## Step 4 — Restart and verify
 
-重启你的 MCP 客户端，然后让 Agent 用以下命令验证：
+Restart your MCP client, then have the agent verify with:
 
 ```shell
 python -c "from qr_reader.server import __version__; print(__version__)"
 ```
 
-或直接在对话中让 Agent 调用 `decode_qrcode_full` 读取一张二维码图片。
+Or ask the agent to call `decode_qrcode_full` on a QR code image directly in conversation.
