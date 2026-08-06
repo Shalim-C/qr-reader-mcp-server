@@ -1,66 +1,55 @@
-# INSTALL_FOR_AGENT.md — Copy This to Your Agent
+# QR Reader MCP Server — 安装指南
 
-> 👤 **You (the human):** copy this entire document into your AI agent's chat.
-> 🤖 **Your agent:** follow the steps below to install the QR Reader MCP Server.
+以下步骤面向 AI Agent，复制全文给你的 Agent 即可自动完成安装。
 
----
+## 环境要求
 
-## Your Task
+开始安装之前，请确保环境中已安装：
+- Python 3.10+
+- libzbar（系统级依赖，pyzbar 需要）
 
-Install `qr-reader-mcp-server` — an MCP tool that gives you the ability to decode QR codes from images.
+## 第 1 步 — 安装 libzbar
 
-Two tools:
-- **decode_qrcode_full** — scan a full image, return all QR codes + quality diagnostics
-- **enhance_and_decode** — crop a region, apply enhancements (upscale/sharpen/contrast/denoise), then decode
-
----
-
-## Step 1 — Install the MCP
-
-First, check whether `libzbar` is available on the system:
-
-```
-# Linux
-dpkg -l | grep libzbar || sudo apt install -y libzbar0
+```shell
+# Ubuntu / Debian
+sudo apt install libzbar0
 
 # macOS
-brew list zbar || brew install zbar
+brew install zbar
 
-# Windows
-# libzbar.dll should be in PATH; if not, install via vcpkg:
-vcpkg install zbar
+# Windows (choco)
+choco install zbar
 ```
 
-Then:
+## 第 2 步 — 克隆仓库并安装
 
-```
+```shell
 cd /d/GitHub
 git clone --depth 1 https://githubproxy.cc/https://github.com/Shalim-C/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
 
-# Choose one:
-# Light (~15 MB):      pip install -e ".[light]"
-# Full (~120 MB):      pip install -e ".[full]"
+# 轻量版（~15 MB），功能完整
+pip install -e ".[light]"
+
+# 全功能版（~120 MB），额外 OpenCV 解码回退
 pip install -e ".[full]"
 ```
 
-**Recommendation:** use `[full]` — the extra ~100MB gives you an OpenCV fallback decoder and finder-pattern detection, making `RETRYABLE → enhance_and_decode` more reliable.
+## 第 3 步 — 注册到 MCP 客户端
 
----
+根据你的客户端选择对应的配置：
 
-## Step 2 — Register in Your MCP Client
-
-Add the following to your MCP client config. If using **Reasonix Go**, add to `[[plugins]]` in `config.toml`:
+**Reasonix Go（config.toml）：**
 
 ```toml
 [[plugins]]
 name    = "qr-reader"
 command = "python"
 args    = ["-m", "qr_reader.server"]
-env     = { LOG_LEVEL = "info", READ_ONLY_MODE = "false" }
+env     = { LOG_LEVEL = "info" }
 ```
 
-If your client uses `.mcp.json` / Claude-style config:
+**Claude Desktop / VS Code / Cursor：**
 
 ```json
 {
@@ -69,40 +58,25 @@ If your client uses `.mcp.json` / Claude-style config:
       "command": "python",
       "args": ["-m", "qr_reader.server"],
       "env": {
-        "LOG_LEVEL": "info",
-        "READ_ONLY_MODE": "false"
+        "LOG_LEVEL": "info"
       }
     }
   }
 }
 ```
 
-**After registering, restart your MCP client** to pick up the new server.
+**uvx（如果已发布到 PyPI）：**
 
----
-
-## Step 3 — Verify
-
-Once restarted, call `decode_qrcode_full` on a test QR image to confirm it works. The MCP server starts and prints its version and cv2 availability in the logs — check for something like:
-
-```
-Starting QR Reader MCP Server v0.1.0 (read_only=False, cv2=True)
+```shell
+uvx qr-reader-mcp-server
 ```
 
----
+## 第 4 步 — 重启并验证
 
-## Optional Configuration
+重启你的 MCP 客户端，然后让 Agent 用以下命令验证：
 
-| Variable | Default | Description |
-|---|---|---|
-| `LOG_LEVEL` | `info` | `debug` / `info` / `warning` / `error` |
-| `READ_ONLY_MODE` | `false` | Set `true` to disable `enhance_and_decode` |
-| `MAX_IMAGE_SIZE` | `10485760` | Max image bytes (default 10 MB) |
-| `MAX_INPUT_PIXELS` | `2560` | Auto-resize long edge if exceeded |
-| `QR_BLUR_THRESHOLD` | `50.0` | Lower = stricter "too blur" check |
-| `QR_CONTRAST_THRESHOLD` | `0.15` | Lower = stricter "too dark" check |
-| `QR_GLARE_THRESHOLD` | `0.3` | Lower = stricter glare detection |
+```shell
+python -c "from qr_reader.server import __version__; print(__version__)"
+```
 
----
-
-You're all set. Your agent can now scan QR codes from any image you give it.
+或直接在对话中让 Agent 调用 `decode_qrcode_full` 读取一张二维码图片。

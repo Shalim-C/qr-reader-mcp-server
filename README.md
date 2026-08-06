@@ -4,6 +4,8 @@
 
 `decode_qrcode_full` 只需图片输入即可工作，任何对接了 MCP 的模型都能直接调用。`enhance_and_decode` 需要模型自行分析图片质量并指定增强区域与策略，因此最适合具备视觉能力的模型使用。
 
+> 🤖 **通过 AI Agent 安装** — 把 [INSTALL_FOR_AGENT.md](INSTALL_FOR_AGENT.md) 全文复制给你的 AI Agent（Claude Code、Codex、Trae、Cursor 等），它会自动完成安装配置。
+
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-1.0-blueviolet)](https://modelcontextprotocol.io/)
