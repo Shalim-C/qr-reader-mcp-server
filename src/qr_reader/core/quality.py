@@ -18,11 +18,13 @@ def analyze_image_quality(img: np.ndarray) -> dict:
     Returns:
         dict with keys: blur_score, contrast, glare_ratio, noise_level.
     """
+    from qr_reader.core.ops import _to_gray
+    gray = _to_gray(img)
     return {
-        "blur_score": round(laplacian_variance(img), 4),
-        "contrast": round(image_contrast(img), 4),
-        "glare_ratio": round(glare_ratio(img), 4),
-        "noise_level": round(noise_level(img), 4),
+        "blur_score": round(laplacian_variance(img, gray=gray), 4),
+        "contrast": round(image_contrast(img, gray=gray), 4),
+        "glare_ratio": round(glare_ratio(img, gray=gray), 4),
+        "noise_level": round(noise_level(img, gray=gray), 4),
     }
 
 

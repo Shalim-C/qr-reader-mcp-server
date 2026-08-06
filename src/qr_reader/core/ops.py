@@ -131,56 +131,66 @@ def image_to_bytes(arr: np.ndarray, fmt: str = "png", channel_order: str = "auto
 # Quality analysis (no cv2 needed — pure numpy)
 # ---------------------------------------------------------------------------
 
-def laplacian_variance(arr: np.ndarray) -> float:
+def laplacian_variance(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
     """Compute Laplacian variance (blur score) with a 3×3 kernel.
 
     Equivalent to cv2.Laplacian(gray, CV_64F).var().
     Higher values = sharper images.
+
+    Args:
+        arr: Source image.
+        gray: Pre-computed grayscale array (avoids redundant _to_gray).
     """
-    if _CV2_AVAILABLE:
+    if gray is not None:
+        g = gray.astype(np.float64) if gray.dtype != np.float64 else gray
+    elif _CV2_AVAILABLE:
         import cv2
-        gray = _to_gray(arr)
-        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        g = _to_gray(arr).astype(np.float64)
+        return float(cv2.Laplacian(g, cv2.CV_64F).var())
+    else:
+        g = _to_gray(arr).astype(np.float64)
+
+    if _CV2_AVAILABLE and gray is not None:
+        import cv2
+        return float(cv2.Laplacian(g, cv2.CV_64F).var())
 
     # Pure numpy fallback — vectorized 3×3 convolution
-    gray = _to_gray(arr).astype(np.float64)
     kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float64)
-    h, w = gray.shape
+    h, w = g.shape
     # Extract overlapping 3×3 patches via slicing (vectorized)
     lap = np.zeros((h - 2, w - 2), dtype=np.float64)
     for dy in range(3):
         for dx in range(3):
             if kernel[dy, dx] != 0:
-                lap += kernel[dy, dx] * gray[dy:dy + h - 2, dx:dx + w - 2]
+                lap += kernel[dy, dx] * g[dy:dy + h - 2, dx:dx + w - 2]
     return float(lap.var())
 
 
-def image_contrast(arr: np.ndarray) -> float:
+def image_contrast(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
     """Compute contrast as (max − min) / 255."""
-    gray = _to_gray(arr)
-    return float(gray.max() - gray.min()) / 255.0
+    g = gray if gray is not None else _to_gray(arr)
+    return float(g.max() - g.min()) / 255.0
 
 
-def glare_ratio(arr: np.ndarray) -> float:
+def glare_ratio(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
     """Fraction of pixels with value > 240."""
-    gray = _to_gray(arr)
-    return float(np.sum(gray > 240)) / gray.size
+    g = gray if gray is not None else _to_gray(arr)
+    return float(np.sum(g > 240)) / g.size
 
 
-def noise_level(arr: np.ndarray) -> float:
+def noise_level(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
     """Estimate noise as std of residual after Gaussian smoothing."""
+    g = gray if gray is not None else _to_gray(arr)
     if _CV2_AVAILABLE:
         import cv2
-        gray = _to_gray(arr)
-        smoothed = cv2.GaussianBlur(gray, (0, 0), 3)
-        return float(np.std(gray.astype(float) - smoothed.astype(float)))
+        smoothed = cv2.GaussianBlur(g, (0, 0), 3)
+        return float(np.std(g.astype(float) - smoothed.astype(float)))
     # Pillow fallback — use a simple box blur
-    gray = _to_gray(arr)
     from PIL import ImageFilter as _Flt
     _ensure_pillow()
-    pil_img = _PIL_IMAGE.fromarray(gray)
+    pil_img = _PIL_IMAGE.fromarray(g)
     smoothed = np.array(pil_img.filter(_Flt.GaussianBlur(3)), dtype=float)
-    return float(np.std(gray.astype(float) - smoothed))
+    return float(np.std(g.astype(float) - smoothed))
 
 
 # ---------------------------------------------------------------------------

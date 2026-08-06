@@ -38,6 +38,12 @@ dev = [
     "opencv-python>=4.9.0",
     "pyzbar>=0.1.9",
 ]
+bench = [
+    "pytest-benchmark>=5.0.0",
+    "opencv-python>=4.9.0",
+    "pyzbar>=0.1.9",
+    "qrcode[pil]>=7.4.0",
+]
 
 [project.scripts]
 qr-reader-mcp = "qr_reader.server:cli"
@@ -49,3 +55,7 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "benchmark: marks a test as a performance benchmark (deselected by default)",
+]
+addopts = "--strict-markers --ignore=tests/bench"
