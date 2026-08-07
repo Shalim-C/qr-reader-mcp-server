@@ -16,18 +16,19 @@
 
 ### 网络访问
 
-- `image_url` 仅通过 HTTPS 获取。服务不会发起任意网络请求——只请求你提供的 URL。
-- 设置 `MAX_IMAGE_SIZE` 可防止大文件下载导致内存耗尽。
+- `image_url` 支持 HTTP 和 HTTPS。服务不会发起任意网络请求——只请求你提供的 URL。
+- SSRF 防护：DNS 解析后逐 IP 校验（拦截私有/回环/保留地址），域名黑名单（云元数据端点等），禁止 HTTP 重定向。
+- `MAX_IMAGE_SIZE` 配合流式下载在下载阶段即拦截超大文件，防止内存耗尽。
 
 ### 攻击面
 
 | 风险 | 缓解措施 |
 |---|---|
-| 畸形图片导致崩溃 | OpenCV/Pillow 处理大多数情况；异常被捕获并返回结构化错误 |
-| image_url SSRF | URL 仅加载到内存，不访问文件系统 |
+| 畸形图片导致崩溃 | Pillow/OpenCV 处理大多数情况；图片加载异常返回 IMAGE_LOAD_FAILED；其他未预期异常由全局兜底返回 INTERNAL_ERROR |
+| image_url SSRF | DNS 解析后全量 IP 校验 + 内网/回环/保留地址黑名单 + 域名黑名单（云元数据端点）+ 禁止 HTTP 重定向 |
 | Base64 炸弹（超大载荷） | `MAX_IMAGE_SIZE` 限制解码后图片大小 |
-| pyzbar 库崩溃 | 由服务错误处理器捕获，返回结构化错误 |
-| 内存耗尽 | `MAX_IMAGE_SIZE`（默认 10 MB）+ 单图处理 |
+| pyzbar 库崩溃 | 解码/诊断路径异常由全局 try/except 捕获，返回 INTERNAL_ERROR |
+| 内存耗尽 | `MAX_IMAGE_SIZE`（默认 10 MB）+ 流式下载逐块检查 + 单图处理 |
 
 ### 认证
 

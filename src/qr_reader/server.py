@@ -9,7 +9,6 @@ enhance operations fall back to Pillow, quality metrics use pure numpy.
 """
 
 import base64
-import importlib.metadata
 import io
 import json
 import logging
@@ -21,7 +20,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region, clamp_bbox, detect_qr_regions
+from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region, clamp_bbox, validate_bbox, detect_qr_regions
 from qr_reader.core.diagnosis import classify_result
 from qr_reader.core.quality import analyze_image_quality
 from qr_reader.core.url_utils import is_private_url
@@ -53,8 +52,8 @@ logging.basicConfig(
 logger = logging.getLogger("qr-reader-mcp")
 
 try:
-    __version__ = importlib.metadata.version("qr-reader-mcp-server")
-except importlib.metadata.PackageNotFoundError:
+    from qr_reader import __version__
+except ImportError:
     __version__ = "0.0.0"
 
 app = Server("qr-reader-mcp-server")
@@ -72,9 +71,7 @@ def load_image(
     """Load an image from local path, base64 string, or URL.
 
     Priority: image_path > image_base64 > image_url.
-    Returns an RGB ndarray (cv2 path returns BGR; light mode returns RGB).
-    Calling code should be agnostic to channel order — both work with the
-    unified ops layer.
+    Returns an RGB ndarray (normalized across backends).
     """
     if image_path:
         ext = os.path.splitext(image_path)[1].lower()
@@ -92,9 +89,21 @@ def load_image(
         if is_private_url(image_url):
             raise ValueError("image_url must not point to internal/private addresses")
         logger.info("Fetching image from URL: %s", image_url[:120])
-        resp = requests.get(image_url, timeout=10)
+        resp = requests.get(image_url, timeout=10, allow_redirects=False, stream=True)
         resp.raise_for_status()
-        img_bytes = resp.content
+        # Stream to enforce MAX_IMAGE_SIZE during download, not after
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in resp.iter_content(chunk_size=8192):
+            total += len(chunk)
+            if total > MAX_IMAGE_SIZE:
+                resp.close()
+                raise ValueError(
+                    f"Image size exceeds limit of {MAX_IMAGE_SIZE} bytes "
+                    f"(received {total}+ bytes)"
+                )
+            chunks.append(chunk)
+        img_bytes = b"".join(chunks)
     else:
         raise ValueError("Must provide one of image_path, image_base64, or image_url")
 
@@ -118,32 +127,22 @@ def img_to_base64(arr: np.ndarray) -> str:
 
 # ── parameter bounds (prevents OOM / NaN / hangs) ───────────────────────
 _ENHANCE_BOUNDS = {
-    "upscale":         {"scale":        (1.0, 8.0)},
-    "sharpen":         {"strength":     (0.3, 5.0)},
-    "adjust_contrast": {"alpha":        (0.5, 3.0)},
-    "denoise":         {"h":            (3, 30)},
+    "upscale":         {"scale":        (1.0, 8.0, 2.0)},
+    "sharpen":         {"strength":     (0.3, 5.0, 1.5)},
+    "adjust_contrast": {"alpha":        (0.5, 3.0, 1.5)},
+    "denoise":         {"h":            (3, 30, 10)},
 }
 _MAX_OPERATIONS = 5
-
 
 def _validate_enhance_params(op: str, params: dict) -> dict:
     """Clamp enhancement parameters to safe ranges and return cleaned params.
 
-    Also guards against the sharpen singularity at strength ≈ 0.889
-    where the kernel denominator (9*strength − 8) approaches zero.
     """
     bounds = _ENHANCE_BOUNDS.get(op, {})
     cleaned = {}
-    for key, (lo, hi) in bounds.items():
-        val = params.get(key, (lo + hi) / 2)  # default to mid-point
+    for key, (lo, hi, default) in bounds.items():
+        val = params.get(key, default)
         cleaned[key] = max(lo, min(hi, val))
-
-    # ── sharpen singularity guard: 9*s − 8 == 0 → s ≈ 0.8889 ───────────
-    if op == "sharpen":
-        s = cleaned["strength"]
-        if abs(9 * s - 8) < 0.08:
-            s = 0.96 if s < 0.89 else 0.82
-            cleaned["strength"] = s
 
     return cleaned
 
@@ -292,6 +291,14 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     logger.info("Tool called: %s", name)
 
+    try:
+        return await _handle_tool(name, arguments)
+    except Exception as exc:
+        logger.exception("Unhandled exception in tool %s", name)
+        return _error("INTERNAL_ERROR", f"Unexpected error: {exc}")
+
+
+async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
     # ── decode_qrcode_full ────────────────────────────────────────────────
     if name == "decode_qrcode_full":
         try:
@@ -340,8 +347,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         # Normalize: single [x,y,w,h] → [[x,y,w,h]] for uniform processing
         if bbox_raw and all(isinstance(v, int) for v in bbox_raw):
-            if len(bbox_raw) != 4:
-                return _error("INVALID_BBOX", "bbox must be [x, y, width, height] or [[x,y,w,h], ...]")
             bboxes = [bbox_raw]
         elif bbox_raw and all(isinstance(r, list) for r in bbox_raw):
             bboxes = bbox_raw
@@ -350,15 +355,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         all_results: list[dict] = []
         for bi, bbox in enumerate(bboxes):
+            # Validate bbox shape — raises ValueError with good message
+            try:
+                validate_bbox(bbox, bi)
+            except ValueError as exc:
+                return _error("INVALID_BBOX", str(exc))
+            x, y, w, h = clamp_bbox(bbox, img.shape)
+
             # No enhancement → crop and decode directly
             if not operations:
                 results = decode_qr_from_region(img, bbox)
-                x, y, w, h = clamp_bbox(bbox, img.shape)
-                classify_img = img[y:y + h, x:x + w] if w > 0 and h > 0 else img
+                classify_img = img[y:y + h, x:x + w]
             else:
-                x, y, w, h = clamp_bbox(bbox, img.shape)
-                if w <= 0 or h <= 0:
-                    return _error("INVALID_BBOX", f"Region {bi}: invalid crop (width/height ≤ 0)")
                 roi = img[y:y + h, x:x + w]
                 enhanced = apply_operations(roi, operations)
                 results = decode_qr_from_image(enhanced)

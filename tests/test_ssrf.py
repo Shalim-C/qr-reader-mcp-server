@@ -27,10 +27,17 @@ class TestIsPrivateUrl:
     @pytest.mark.parametrize("url", [
         "https://example.com/img.png",
         "http://8.8.8.8/img.png",
-        "https://github.com/raw/repo/main/qr.png",
     ])
     def test_public_urls_allowed(self, url):
         assert is_private_url(url) is False
+
+    def test_public_domain_allowed(self, mocker):
+        """github.com should pass when DNS resolves to a public IP.
+        Mock DNS to avoid local proxy interference (e.g. Steam++)."""
+        mocker.patch("socket.getaddrinfo", return_value=[
+            (2, 0, 0, "", ("140.82.121.3", 0)),  # real GitHub IP
+        ])
+        assert is_private_url("https://github.com/raw/repo/main/qr.png") is False
 
     # --- 非 http/https scheme 应被阻止 ---
 

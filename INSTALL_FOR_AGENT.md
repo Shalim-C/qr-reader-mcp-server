@@ -2,6 +2,8 @@
 
 The following steps are written for AI agents. Send this link to your agent and it will handle installation automatically.
 
+> ⚠️ **Before running**: An AI agent should **always show you the commands and wait for your review** before executing them. Never let an agent run installation commands without your explicit approval.
+
 ## Prerequisites
 
 Ensure the environment has:
@@ -24,14 +26,13 @@ choco install zbar
 ## Step 2 — Clone and install
 
 ```shell
-cd /d/GitHub
-git clone --depth 1 https://githubproxy.cc/https://github.com/Shalim-C/qr-reader-mcp-server.git
+git clone --depth 1 https://github.com/Shalim-C/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
 
-# Light (~15 MB) — full functionality
-pip install -e ".[light]"
+# Base install (~15 MB) — full QR decoding
+pip install -e .
 
-# Full (~120 MB) — adds OpenCV decode fallback
+# Full (~120 MB) — adds OpenCV decode fallback and better diagnosis
 pip install -e ".[full]"
 ```
 
@@ -65,7 +66,7 @@ env     = { LOG_LEVEL = "info" }
 }
 ```
 
-**uvx (once published to PyPI):**
+**uvx:**
 
 ```shell
 uvx qr-reader-mcp-server
@@ -76,7 +77,7 @@ uvx qr-reader-mcp-server
 Restart your MCP client, then have the agent verify with:
 
 ```shell
-python -c "from qr_reader.server import __version__; print(__version__)"
+python -c "from qr_reader import __version__; print(__version__)"
 ```
 
 Or ask the agent to call `decode_qrcode_full` on a QR code image directly in conversation.

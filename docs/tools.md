@@ -19,6 +19,10 @@
 {
   "type": "object",
   "properties": {
+    "image_path": {
+      "type": "string",
+      "description": "本地图片绝对路径（推荐）——传文件路径而非 base64，避免 stdio 管道传输大体积数据超时"
+    },
     "image_base64": {
       "type": "string",
       "description": "Base64 编码的 PNG/JPEG 图片"
@@ -31,7 +35,7 @@
 }
 ```
 
-`image_base64` 和 `image_url` 至少提供一个。
+`image_path`、`image_base64` 和 `image_url` 至少提供一个。`image_path` 为首选。
 
 ### 输出字段
 
@@ -46,10 +50,10 @@
 | `results[].raw_bytes` | string | 十六进制原始字节 |
 | `results[].result_code` | string | 逐码结果码（多码场景） |
 | `results[].warning` | string | 警告类型（当 `SUCCESS_WITH_WARNING` 时） |
-| `diagnosis` | object | 质量指标和问题分类 |
-| `diagnosis.total_detected` | int | 检测到的二维码数量 |
-| `diagnosis.quality` | object | `blur_score`、`contrast`、`glare_ratio`、`noise_level` |
-| `diagnosis.primary_issue` | string | 失败根因（`too_blur`、`too_dark`、`glare`、`low_contrast`、`no_qr`、`invalid_encoding`） |
+| `analysis` | object | 质量指标和问题分类 |
+| `analysis.total_detected` | int | 检测到的二维码数量 |
+| `analysis.quality` | object | `blur_score`、`contrast`、`glare_ratio`、`noise_level` |
+| `analysis.primary_issue` | string | 失败根因（`too_blur`、`too_dark`、`glare`、`low_contrast`、`no_qr`、`invalid_encoding`） |
 | `suggestion` | string\|null | 人类可读的修复建议 |
 
 ### 错误返回
@@ -83,6 +87,7 @@
 {
   "type": "object",
   "properties": {
+    "image_path": { "type": "string" },
     "image_base64": { "type": "string" },
     "image_url": { "type": "string" },
     "bbox": {
@@ -105,7 +110,7 @@
       }
     }
   },
-  "required": ["bbox", "operations"]
+  "required": ["bbox"]
 }
 ```
 
@@ -121,16 +126,16 @@
 ### AI 决策流程
 
 ```
-diagnosis.primary_issue = "too_blur"（太模糊）
+analysis.primary_issue = "too_blur"（太模糊）
   → upscale (scale=2.0–3.0) + sharpen (strength=1.5–2.0)
 
-diagnosis.primary_issue = "glare"（反光）
+analysis.primary_issue = "glare"（反光）
   → adjust_contrast (alpha=0.8)  // 压低高光
 
-diagnosis.primary_issue = "low_contrast"（对比度不足）
+analysis.primary_issue = "low_contrast"（对比度不足）
   → adjust_contrast (alpha=2.0–3.0)
 
-diagnosis.primary_issue = "too_dark"（太暗）
+analysis.primary_issue = "too_dark"（太暗）
   → adjust_contrast (alpha=2.0, beta=30) + denoise
 ```
 

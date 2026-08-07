@@ -30,12 +30,11 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 def _decode_with_pyzbar(img: np.ndarray) -> list[dict]:
-    """Decode using pyzbar — best accuracy, supports multi-code."""
+    """Decode all barcode types pyzbar supports (QR, EAN, Code128,
+    DataMatrix, Aztec, PDF417, etc.)."""
     results: list[dict] = []
     decoded_objects = pyzbar.decode(img)
     for obj in decoded_objects:
-        if obj.type not in ("QRCODE", "QR_CODE"):
-            continue
         content = obj.data.decode("utf-8", errors="replace")
         x, y, w, h = obj.rect
         results.append({
@@ -61,11 +60,40 @@ def detect_qr_regions(img: np.ndarray) -> bool | None:
     return qr_detect(img)
 
 
-def clamp_bbox(bbox: list[int], img_shape: tuple) -> tuple[int, int, int, int]:
-    """Clamp a [x, y, w, h] bbox to image bounds, returning (x, y, w, h)."""
+def validate_bbox(bbox: list, region_index: int = 0) -> tuple[int, int, int, int]:
+    """Validate and normalize a bbox [x, y, w, h].
+
+    Returns (x, y, w, h) with all values clamped to image bounds.
+    Raises ValueError with a descriptive message on invalid input.
+    """
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        raise ValueError(
+            f"Region {region_index}: bbox must be [x, y, width, height] "
+            f"(got {len(bbox) if isinstance(bbox, list) else type(bbox).__name__})"
+        )
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in bbox):
+        raise ValueError(
+            f"Region {region_index}: all bbox values must be integers "
+            f"(got {bbox})"
+        )
     x, y, w, h = bbox
-    x = max(0, x)
-    y = max(0, y)
+    if w <= 0 or h <= 0:
+        raise ValueError(
+            f"Region {region_index}: bbox width and height must be > 0 "
+            f"(got {w}×{h})"
+        )
+    return x, y, w, h
+
+
+def clamp_bbox(bbox: list[int], img_shape: tuple) -> tuple[int, int, int, int]:
+    """Clamp a [x, y, w, h] bbox to image bounds, returning (x, y, w, h).
+
+    x and y are clamped to [0, width) and [0, height) respectively.
+    w and h are reduced if they would extend past the image edge.
+    """
+    x, y, w, h = bbox
+    x = max(0, min(x, img_shape[1] - 1))
+    y = max(0, min(y, img_shape[0] - 1))
     w = min(w, img_shape[1] - x)
     h = min(h, img_shape[0] - y)
     return x, y, w, h

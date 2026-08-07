@@ -80,8 +80,11 @@ class TestLoadImage:
         img = Image.new("RGB", (5, 5), color="red")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        mock_get.return_value.content = buf.getvalue()
-        mock_get.return_value.raise_for_status = lambda: None
+        data = buf.getvalue()
+        mock_resp = mocker.MagicMock()
+        mock_resp.iter_content = lambda chunk_size: [data]
+        mock_resp.raise_for_status = lambda: None
+        mock_get.return_value = mock_resp
         result = load_image(image_url="https://example.com/qr.png")
         assert result.shape == (5, 5, 3)
 
@@ -241,19 +244,27 @@ class TestCallToolDecodeQrcodeFull:
 
     @pytest.mark.asyncio
     async def test_success_path(self, mocker, sample_qr_image):
-        """End-to-end: decode_qrcode_full returns structured result."""
+        """End-to-end: decode_qrcode_full on a real QR returns SUCCESS."""
         from qr_reader.server import call_tool
 
-        # Mock load_image to return our synthetic QR
         mocker.patch("qr_reader.server.load_image", return_value=sample_qr_image)
-        # Mock decode_qr_from_image — let real pyzbar run if available
         result = await call_tool("decode_qrcode_full", {"image_path": "/fake/qr.png"})
         payload = json.loads(result[0].text)
+
+        # Verify result_code is present and valid
         assert "result_code" in payload
-        assert payload["result_code"] in (
-            "SUCCESS", "SUCCESS_WITH_WARNING", "RETRYABLE",
-            "NO_QR_FOUND", "QR_UNRECOVERABLE",
-        )
+
+        # When pyzbar is available, a clean QR should decode to SUCCESS
+        try:
+            from pyzbar import pyzbar as _  # noqa
+            assert payload["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING")
+            assert payload["results"][0]["content"] == "https://example.com/test"
+        except ImportError:
+            # Without pyzbar, any result_code is acceptable
+            assert payload["result_code"] in (
+                "SUCCESS", "SUCCESS_WITH_WARNING", "RETRYABLE",
+                "NO_QR_FOUND", "QR_UNRECOVERABLE",
+            )
 
     @pytest.mark.asyncio
     async def test_image_load_failure(self, mocker):

@@ -113,7 +113,7 @@ python -m qr_reader.server
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "ghcr.io/<your-org>/qr-reader-mcp-server"
+        "ghcr.io/Shalim-C/qr-reader-mcp-server"
       ]
     }
   }

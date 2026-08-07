@@ -57,7 +57,8 @@ class TestDecodeQrFromImagePyzbar:
         assert results[0]["type"] == "QRCODE"
         assert len(results[0]["bbox"]) == 4
 
-    def test_skips_non_qr_barcodes(self, mocker, monkeypatch):
+    def test_all_barcode_types_decoded(self, mocker, monkeypatch):
+        """EAN13 and QRCODE both decoded — no type filtering."""
         monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", True)
         mocker.patch("qr_reader.core.decoder._decode_with_pyzbar", return_value=[
             _fake_result("qr content", "QRCODE"),
@@ -65,8 +66,6 @@ class TestDecodeQrFromImagePyzbar:
         ])
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         results = decode_qr_from_image(img)
-        # EAN13 is included because _decode_with_pyzbar already filters —
-        # but the test mock bypasses real filtering. Test at integration level.
         assert len(results) == 2
 
     def test_multiple_qr_codes(self, mocker, monkeypatch):
@@ -198,10 +197,14 @@ class TestClampBbox:
         x, y, w, h = clamp_bbox([10, 10, 0, 0], self.IMG)
         assert (x, y, w, h) == (10, 10, 0, 0)
 
-    def test_completely_outside_image_allows_negative_size(self):
-        x, y, w, h = clamp_bbox([500, 500, 100, 100], self.IMG)
-        assert (x, y) == (500, 500)
-        assert w < 0 and h < 0
+    def test_completely_outside_image_clamped_to_edge(self):
+        """Before: outside image → negative sizes. Now: properly clamped to edge."""
+        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        x, y, w, h = clamp_bbox([500, 500, 100, 100], img.shape)
+        # x and y are clamped to image bounds
+        assert (x, y) == (9, 9)
+        # w and h are reduced to fit within remaining space
+        assert w == 1 and h == 1
 
 
 # ---------------------------------------------------------------------------

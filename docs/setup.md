@@ -14,9 +14,8 @@ sudo apt install libzbar0
 # macOS
 brew install zbar
 
-# Windows（通过 vcpkg）
-vcpkg install zbar
-# 如需，设置 ZBAR_PATH 环境变量
+# Windows（通过 choco）
+choco install zbar
 ```
 
 ## 安装方式
@@ -24,8 +23,8 @@ vcpkg install zbar
 ### 方式一：pip（推荐）
 
 ```bash
-git clone https://github.com/Shalim-C/QR.git
-cd QR
+git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
+cd qr-reader-mcp-server
 pip install -e .
 ```
 
@@ -91,20 +90,16 @@ pip install qr-reader-mcp-server
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "ghcr.io/<your-org>/qr-reader-mcp-server"
+        "ghcr.io/Shalim-C/qr-reader-mcp-server"
       ]
     }
   }
 }
 ```
 
-## 配置
+## 环境变量
 
-复制 `.env.example` 为 `.env` 并根据需要修改：
-
-```bash
-cp .env.example .env
-```
+通过 MCP 客户端的 `env` 配置段设置以下变量（服务不读取 `.env` 文件）：
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|

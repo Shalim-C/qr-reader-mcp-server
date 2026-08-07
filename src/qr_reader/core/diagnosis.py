@@ -33,10 +33,8 @@ def _check_warning(content: str | None) -> dict | None:
     """Inspect decoded content for quality warnings."""
     if content is None or content == "":
         return {"warning": "empty_content", "detail": "QR code is valid but contains no data"}
-    try:
-        content.encode("utf-8")
-    except UnicodeEncodeError:
-        return {"warning": "garbled", "detail": "Content contains non-UTF-8 characters, possibly binary data or garbled text"}
+    # Non-printable characters (excluding common whitespace) indicate
+    # corrupt or binary data.
     if any(ord(c) < 32 and c not in "\n\r\t" for c in content):
         return {"warning": "garbled", "detail": "Content contains non-printable characters, decoding may be corrupt"}
     return None
@@ -85,13 +83,13 @@ def classify_result(
                 "suggestion": None,
             }
         # Decode failed but we can't tell if QR exists (no cv2)
-        if is_too_blur(quality["blur_score"]):
+        if is_too_blur(quality["blur_score"], THRESHOLDS["blur"]):
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "blur", "quality": quality},
                 "suggestion": "Image is blurry — try re-shooting with better focus, or install cv2 for finder-pattern detection",
             }
-        if has_glare(quality["glare_ratio"]):
+        if has_glare(quality["glare_ratio"], THRESHOLDS["glare"]):
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "glare", "quality": quality},
@@ -100,20 +98,20 @@ def classify_result(
         return {
             "result_code": "RETRYABLE",
             "analysis": {"primary_issue": "unknown", "quality": quality},
-            "suggestion": "No QR decoded. Could be no QR in image, or the code needs enhancement. Try enhance_and_decode on suspected QR regions, or install cv2 for better detection",
+            "suggestion": "No QR code decoded. Without OpenCV (light install), the server cannot detect whether QR codes exist in the image. The image may contain no QR code, or may need enhancement — install 'full' extras (opencv-python) for detector-based diagnosis.",
         }
 
     quality = analyze_image_quality(img)
 
     # -- No QR found --------------------------------------------------------
     if not qr_detected:
-        if is_too_blur(quality["blur_score"]):
+        if is_too_blur(quality["blur_score"], THRESHOLDS["blur"]):
             return {
                 "result_code": "NO_QR_FOUND",
                 "analysis": {"primary_issue": "too_blur", "quality": quality},
                 "suggestion": "Image is too blurry to locate QR codes — try re-shooting with better focus",
             }
-        if is_low_contrast(quality["contrast"]):
+        if is_low_contrast(quality["contrast"], THRESHOLDS["contrast"]):
             return {
                 "result_code": "NO_QR_FOUND",
                 "analysis": {"primary_issue": "too_dark", "quality": quality},
@@ -127,19 +125,19 @@ def classify_result(
 
     # -- QR found but could not decode --------------------------------------
     if not decode_success:
-        if is_too_blur(quality["blur_score"]):
+        if is_too_blur(quality["blur_score"], THRESHOLDS["blur"]):
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "blur", "quality": quality},
                 "suggestion": "QR code region is blurry — try cropping and enlarging, then retry with enhance_and_decode",
             }
-        if has_glare(quality["glare_ratio"]):
+        if has_glare(quality["glare_ratio"], THRESHOLDS["glare"]):
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "glare", "quality": quality},
                 "suggestion": "Glare is covering the QR code — try adjusting the shooting angle and retry",
             }
-        if is_low_contrast(quality["contrast"]):
+        if is_low_contrast(quality["contrast"], THRESHOLDS["contrast"]):
             return {
                 "result_code": "RETRYABLE",
                 "analysis": {"primary_issue": "low_contrast", "quality": quality},

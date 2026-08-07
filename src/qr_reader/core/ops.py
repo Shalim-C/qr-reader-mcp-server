@@ -52,16 +52,17 @@ def _ensure_pillow():
 # ---------------------------------------------------------------------------
 
 def load_image_bytes(img_bytes: bytes, max_long_edge: int = 2560) -> np.ndarray:
-    """Load image bytes → numpy array (H×W×C BGR when cv2, RGB when Pillow).
+    """Load image bytes → numpy array (H×W×C RGB).
 
-    When cv2 is absent, returns RGB — callers that need BGR should convert.
     Auto-resizes if longer edge exceeds max_long_edge.
+    Returns RGB regardless of backend (cv2 natively returns BGR).
     """
     if _CV2_AVAILABLE:
         import cv2
         arr = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
         if arr is None:
             raise ValueError("Failed to decode image — unsupported format or corrupt data")
+        arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)  # normalize to RGB
         h, w = arr.shape[:2]
         longer = max(h, w)
         if longer > max_long_edge:
@@ -95,20 +96,7 @@ def image_to_bytes(arr: np.ndarray, fmt: str = "png", channel_order: str = "auto
             channel means in the center region.
     """
     if channel_order == "auto":
-        if arr.ndim == 3 and arr.shape[2] >= 3:
-            h, w = arr.shape[:2]
-            # Sample center 25% of the image
-            cy, cx = h // 2, w // 2
-            ch, cw = max(h // 4, 1), max(w // 4, 1)
-            center = arr[cy - ch:cy + ch, cx - cw:cx + cw, :3]
-            # BGR heuristic: blue channel tends to be dimmer than red
-            # when the image is a real-world photo (sky, faces, etc.).
-            # For QR codes this is unreliable, so default to RGB if close.
-            b_mean = center[:, :, 0].mean()
-            r_mean = center[:, :, 2].mean()
-            channel_order = "bgr" if r_mean > b_mean * 1.1 else "rgb"
-        else:
-            channel_order = "rgb"
+        channel_order = "rgb"  # load_image_bytes always returns RGB now
 
     if _CV2_AVAILABLE:
         import cv2
@@ -157,6 +145,8 @@ def laplacian_variance(arr: np.ndarray, gray: np.ndarray | None = None) -> float
     # Pure numpy fallback — vectorized 3×3 convolution
     kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float64)
     h, w = g.shape
+    if h < 3 or w < 3:
+        return 0.0  # image too small for Laplacian
     # Extract overlapping 3×3 patches via slicing (vectorized)
     lap = np.zeros((h - 2, w - 2), dtype=np.float64)
     for dy in range(3):
@@ -209,75 +199,37 @@ def op_upscale(arr: np.ndarray, scale: float) -> np.ndarray:
     return np.array(img.resize((new_w, new_h), _PIL_IMAGE.LANCZOS))
 
 
+
+
 def op_sharpen(arr: np.ndarray, strength: float) -> np.ndarray:
-    """Sharpen with custom kernel. strength ∈ [0.3, 5.0].
+    """Sharpen using standard unsharp mask.  strength=1.0 is neutral.
 
-    Uses the same 3×3 kernel公式 on both cv2 and Pillow paths
-    for consistent output.  The kernel is:
-
-        [-1 -1 -1]
-        [-1 9s -1] / (9s − 8)   where s = strength
-        [-1 -1 -1]
-
-    A singularity exists at s ≈ 0.8889 where the denominator → 0;
-    callers must guard this (server._validate_enhance_params handles it).
+    cv2 path:  GaussianBlur + addWeighted (unsharp mask).
+    Pillow path: ImageEnhance.Sharpness.
+    No singularity — safe across the full (0.3, 5.0) range.
     """
-    denom = 9 * strength - 8
-    kernel = np.array([[-1, -1, -1], [-1, 9 * strength, -1], [-1, -1, -1]], dtype=np.float32) / denom
-
     if _CV2_AVAILABLE:
         import cv2
-        return cv2.filter2D(arr, -1, kernel)
+        blurred = cv2.GaussianBlur(arr, (0, 0), 3)
+        return cv2.addWeighted(arr, 1.0 + strength, blurred, -strength, 0)
 
-    # Pillow fallback — same kernel via vectorized numpy convolution
+    # Pillow fallback
     _ensure_pillow()
-    if arr.ndim == 3:
-        result = np.zeros_like(arr, dtype=np.float32)
-        for c in range(arr.shape[2]):
-            ch = arr[:, :, c].astype(np.float32)
-            h, w = ch.shape
-            padded = np.pad(ch, 1, mode='edge')
-            conv = (
-                kernel[0, 0] * padded[0:h,     0:w] +
-                kernel[0, 1] * padded[0:h,     1:w + 1] +
-                kernel[0, 2] * padded[0:h,     2:w + 2] +
-                kernel[1, 0] * padded[1:h + 1, 0:w] +
-                kernel[1, 1] * padded[1:h + 1, 1:w + 1] +
-                kernel[1, 2] * padded[1:h + 1, 2:w + 2] +
-                kernel[2, 0] * padded[2:h + 2, 0:w] +
-                kernel[2, 1] * padded[2:h + 2, 1:w + 1] +
-                kernel[2, 2] * padded[2:h + 2, 2:w + 2]
-            )
-            result[:, :, c] = np.clip(conv, 0, 255)
-        return result.astype(np.uint8)
-    else:
-        ch = arr.astype(np.float32)
-        h, w = ch.shape
-        padded = np.pad(ch, 1, mode='edge')
-        conv = (
-            kernel[0, 0] * padded[0:h,     0:w] +
-            kernel[0, 1] * padded[0:h,     1:w + 1] +
-            kernel[0, 2] * padded[0:h,     2:w + 2] +
-            kernel[1, 0] * padded[1:h + 1, 0:w] +
-            kernel[1, 1] * padded[1:h + 1, 1:w + 1] +
-            kernel[1, 2] * padded[1:h + 1, 2:w + 2] +
-            kernel[2, 0] * padded[2:h + 2, 0:w] +
-            kernel[2, 1] * padded[2:h + 2, 1:w + 1] +
-            kernel[2, 2] * padded[2:h + 2, 2:w + 2]
-        )
-        return np.clip(conv, 0, 255).astype(arr.dtype)
+    from PIL import Image as _Img, ImageEnhance
+    pil = _Img.fromarray(arr) if arr.ndim == 3 else _Img.fromarray(arr, mode="L")
+    return np.array(ImageEnhance.Sharpness(pil).enhance(strength))
 
 
 def op_contrast(arr: np.ndarray, alpha: float, beta: float = 0) -> np.ndarray:
-    """Adjust contrast. alpha ∈ [0.5, 3.0]."""
+    """Adjust contrast with linear transform: out = alpha * arr + beta.
+
+    Same formula on both cv2 and Pillow paths for consistent output.
+    """
     if _CV2_AVAILABLE:
         import cv2
         return cv2.convertScaleAbs(arr, alpha=alpha, beta=beta)
-    _ensure_pillow()
-    img = _PIL_IMAGE.fromarray(arr)
-    enhancer = _PIL_IMAGE_ENHANCE.Contrast(img)
-    # Pillow contrast: 1.0 = original, <1 = less, >1 = more
-    return np.array(enhancer.enhance(alpha))
+    # Pillow fallback — same linear transform
+    return np.clip(alpha * arr.astype(np.float32) + beta, 0, 255).astype(np.uint8)
 
 
 def op_denoise(arr: np.ndarray, h: int) -> np.ndarray:

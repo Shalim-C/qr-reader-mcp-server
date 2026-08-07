@@ -14,7 +14,7 @@ sudo apt install libzbar0
 brew install zbar
 
 # Windows
-vcpkg install zbar
+choco install zbar
 ```
 
 ### "ImportError: Unable to find zbar shared library"
@@ -52,7 +52,10 @@ set ZBAR_PATH=C:\path\to\vcpkg\installed\x64-windows\bin
 
 ### "RETRYABLE" 循环——增强后仍然失败
 
-二维码可能已永久损坏。多次增强无效后，`result_code` 会变为 `QR_UNRECOVERABLE`。告知用户二维码已损坏。
+每次工具调用独立分类，不会自动进行状态迁移。如果多次增强无效，建议：
+1. 自行限制重试次数（建议不超过 3 次）
+2. 确认图片中确实存在二维码
+3. 尝试让用户重新拍摄（防抖、调整光线）
 
 ### 服务启动了但 MCP 客户端连不上
 

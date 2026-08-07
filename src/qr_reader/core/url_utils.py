@@ -1,16 +1,62 @@
-"""URL validation utilities for SSRF protection."""
+"""URL validation utilities for SSRF protection.
+
+Defense in depth:
+  1. Scheme whitelist (http/https only)
+  2. Hostname blocklist (localhost, metadata endpoints, etc.)
+  3. DNS resolution + IP validation (every resolved IP checked)
+  4. Redirect disabled at the HTTP client level (server.py)
+"""
 
 import ipaddress
+import socket
 from urllib.parse import urlparse
 
-# 仅 http/https，拒绝 file:// / ftp:// 等
 _ALLOWED_SCHEMES = {"http", "https"}
+
+# Hostnames that resolve to private/internal addresses at various cloud
+# providers — these won't be caught by a simple IP check alone.
+_BLOCKED_HOSTNAMES = frozenset({
+    "localhost",
+    "0.0.0.0",
+    "::1",
+    "metadata.google.internal",       # GCP
+    "169.254.169.254",                # AWS / cloud-init
+    "metadata.tencentyun.com",        # Tencent Cloud
+    "100.100.100.200",                # Alibaba Cloud
+})
+
+
+def _is_private_ip(ip_str: str) -> bool:
+    """Check whether an IP string is private/loopback/link-local/reserved.
+
+    Returns True for any address that should be blocked.
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        # Not a valid IP literal — allow (hostname, will be DNS-resolved
+        # separately).
+        return False
+    return bool(
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
 
 
 def is_private_url(url: str) -> bool:
-    """检查 URL 是否指向内网/私有地址，防止 SSRF。
+    """Check whether a URL targets an internal/private address.
 
     Returns True if the URL should be blocked.
+
+    Layers:
+      1. Scheme must be http or https.
+      2. Hostname in known blocklist → blocked.
+      3. If hostname is an IP literal → validate directly.
+      4. If hostname is a domain → resolve DNS and validate every IP.
     """
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
@@ -20,15 +66,27 @@ def is_private_url(url: str) -> bool:
     if not hostname:
         return True
 
-    # 常见内网主机名
-    if hostname in ("localhost", "0.0.0.0", "::1"):
+    # -- Block known internal hostnames -----------------------------------
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
         return True
 
-    # 尝试解析 IP 地址
+    # -- Direct IP literal ------------------------------------------------
+    if _is_private_ip(hostname):
+        return True
+
+    # -- DNS resolution ---------------------------------------------------
+    # Resolve the hostname and check every returned IP.  A single private
+    # IP in the result set means the URL is dangerous (DNS rebinding).
+    # If resolution fails, we don't block — the subsequent HTTP request
+    # will also fail, so there's no practical attack window.
     try:
-        ip = ipaddress.ip_address(hostname)
-        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-    except ValueError:
-        # 不是 IP 地址（是域名），不阻止——DNS 解析后的 SSRF 风险
-        # 由 requests 层和 timeout 限制，这里不覆盖
+        addrinfo = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
         return False
+
+    for item in addrinfo:
+        ip_str = item[4][0]
+        if _is_private_ip(ip_str):
+            return True
+
+    return False
