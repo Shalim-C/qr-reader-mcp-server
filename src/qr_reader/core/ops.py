@@ -16,6 +16,7 @@ When cv2 is absent:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -31,10 +32,10 @@ try:
 except ImportError:
     pass
 
-# Lazy imports for Pillow fallback
-_PIL_IMAGE: type | None = None
-_PIL_IMAGE_ENHANCE: object | None = None
-_PIL_IMAGE_FILTER: object | None = None
+# Lazy imports for Pillow fallback (Any typed — assigned dynamically in _ensure_pillow)
+_PIL_IMAGE: Any = None
+_PIL_IMAGE_ENHANCE: Any = None
+_PIL_IMAGE_FILTER: Any = None
 
 
 def _ensure_pillow():
@@ -125,9 +126,9 @@ def image_to_bytes(arr: np.ndarray, fmt: str = "png", channel_order: str = "auto
         if channel_order == "bgr":
             arr = arr[:, :, ::-1]  # BGR → RGB
         img = _PIL_IMAGE.fromarray(arr)
-        buf = BytesIO()
-        img.save(buf, format=fmt.upper() if fmt != "jpg" else "JPEG")
-        return buf.getvalue()
+        bio = BytesIO()
+        img.save(bio, format=fmt.upper() if fmt != "jpg" else "JPEG")
+        return bio.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +253,8 @@ def noise_level(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
     from PIL import ImageFilter as _Flt
     _ensure_pillow()
     pil_img = _PIL_IMAGE.fromarray(g)
-    smoothed = np.array(pil_img.filter(_Flt.GaussianBlur(3)), dtype=float)
-    return float(np.std(g.astype(float) - smoothed))
+    smoothed = np.array(pil_img.filter(_Flt.GaussianBlur(3)), dtype=np.float64)
+    return float(np.std(g.astype(float) - smoothed))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +356,8 @@ def qr_decode_opencv(arr: np.ndarray) -> list[dict]:
         ret = detector.detectAndDecode(gray)
         if isinstance(ret, tuple) and len(ret) >= 2 and ret[0]:
             content = ret[1]
+            if not isinstance(content, str):
+                return results
             pts = ret[2] if len(ret) > 2 else None
             bbox = _points_to_bbox(pts) if pts is not None else [0, 0, 0, 0]
             results.append({

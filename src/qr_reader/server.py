@@ -74,7 +74,7 @@ def load_image(
     image_path: str | None = None,
     image_base64: str | None = None,
     image_url: str | None = None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, dict]:
     """Load an image from local path, base64 string, or URL.
 
     Priority: image_path > image_base64 > image_url.
@@ -140,7 +140,7 @@ def img_to_base64(arr: np.ndarray) -> str:
 # ---------------------------------------------------------------------------
 
 # ── parameter bounds (prevents OOM / NaN / hangs) ───────────────────────
-_ENHANCE_BOUNDS = {
+_ENHANCE_BOUNDS: dict[str, dict[str, tuple[float, float, float]]] = {
     "upscale":         {"scale":        (1.0, 8.0, 2.0)},
     "sharpen":         {"strength":     (0.3, 5.0, 1.5)},
     "adjust_contrast": {"alpha":        (0.5, 3.0, 1.5)},

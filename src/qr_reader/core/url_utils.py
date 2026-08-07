@@ -86,7 +86,7 @@ def is_private_url(url: str) -> bool:
 
     for item in addrinfo:
         ip_str = item[4][0]
-        if _is_private_ip(ip_str):
+        if _is_private_ip(str(ip_str)):
             return True
 
     return False
