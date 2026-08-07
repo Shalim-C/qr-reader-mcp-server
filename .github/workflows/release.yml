@@ -25,6 +25,8 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          skip-existing: true
+        with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
   docker:
@@ -45,8 +47,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/shalim-c/qr-reader-mcp-server:${{ github.ref_name }}
+            ghcr.io/shalim-c/qr-reader-mcp-server:latest
 
   github-release:
     runs-on: ubuntu-latest
