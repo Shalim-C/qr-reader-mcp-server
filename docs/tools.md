@@ -30,6 +30,11 @@
     "image_url": {
       "type": "string",
       "description": "可公开访问的图片 URL"
+    },
+    "symbologies": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "可选码制白名单。支持：QRCODE, EAN13, EAN8, CODE128, CODE39, CODABAR, I25, UPC-A, UPC-E, PDF417, DataMatrix, Aztec。默认（省略或空数组）= 全部。示例：[\"EAN13\"] 只解收据条码，[\"QRCODE\"] 只解二维码"
     }
   }
 }
@@ -46,7 +51,7 @@
 | `results` | array | 解码结果数组（仅成功时） |
 | `results[].content` | string\|null | 解码文本内容 |
 | `results[].bbox` | [int,int,int,int] | 二维码坐标 `[x, y, width, height]` |
-| `results[].type` | string | 始终为 `"QRCODE"` |
+| `results[].type` | string | 码制类型（QRCODE / EAN13 / CODE128 等，由 pyzbar 检测） |
 | `results[].raw_bytes` | string | 十六进制原始字节 |
 | `results[].result_code` | string | 逐码结果码（多码场景） |
 | `results[].warning` | string | 警告类型（当 `SUCCESS_WITH_WARNING` 时） |

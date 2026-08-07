@@ -36,9 +36,9 @@ QR Reader MCP Server 把 zbar 二维码解码能力**嵌入** AI 工作流——
 
 | 工具 | 说明 |
 |---|---|
-| `decode_qrcode_full` | 扫描整张图片，返回所有二维码的内容 + 质量诊断 |
-| `auto_enhance` | 一键自动恢复 — 7 种增强策略有序尝试，首次成功即返回 |
+| `auto_enhance` | 一键自动恢复 — 7 种增强策略有序尝试，首次成功即返回。成功后除 JSON 诊断外还返回增强区域的 PNG 截图（ImageContent），多模态模型可肉眼复核 |
 | `enhance_and_decode` | 手动精控 — 对指定区域执行自定义增强后再解码 |
+| `decode_qrcode_full` | 扫描整张图片，返回所有条形码的内容 + 质量诊断。支持 `symbologies` 参数按码制过滤 |
 
 ### 比成功/失败更多的信息
 
