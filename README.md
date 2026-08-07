@@ -2,7 +2,7 @@
 
 **一个 MCP 工具，让 AI 真正读懂二维码。视觉模型能"看到"有码但解不了——这个工具补上了这一步。不只返回内容，还告诉 Agent 码清不清楚、值不值得增强重试。**
 
-`decode_qrcode_full` 只需图片输入即可工作，任何对接了 MCP 的模型都能直接调用。`enhance_and_decode` 需要模型自行分析图片质量并指定增强区域与策略，因此最适合具备视觉能力的模型使用。
+`decode_qrcode_full` 只需图片输入即可工作，任何对接了 MCP 的模型都能直接调用。`auto_enhance` 在质量不佳时自动尝试增强恢复，无需手动干预。`enhance_and_decode` 适合需要精确控制的场景。
 
 > 🤖 **通过 AI Agent 安装** — 把这条链接发给你的 AI Agent，它会自动完成安装配置：
 >
@@ -20,16 +20,17 @@ AI 模型面临一个尴尬的问题：有视觉能力的模型能认出"图里�
 
 QR Reader MCP Server 把 zbar 二维码解码能力**嵌入** AI 工作流——只要有图片输入，就能读出码里的内容。视觉模型可主动触发，纯文本模型通过用户引导触发。
 
-### 两个工具
+### 三个工具
 
 | 工具 | 说明 |
 |---|---|
-| `decode_qrcode_full` | 扫描整张图片，返回所有二维码的内容 |
-| `enhance_and_decode` | 对模糊/反光/太小的区域做增强后再解码 |
+| `decode_qrcode_full` | 扫描整张图片，返回所有二维码的内容 + 质量诊断 |
+| `auto_enhance` | 一键自动恢复 — 7 种增强策略有序尝试，首次成功即返回 |
+| `enhance_and_decode` | 手动精控 — 对指定区域执行自定义增强后再解码 |
 
 ### 比成功/失败更多的信息
 
-实际场景中二维码质量参差不齐——模糊、反光、太小、对比度不够。MCP 在返回解码结果的同时，也附带了图像质量数据（模糊度、对比度、反光比例）和 `result_code`。Agent 拿到这些信息后，可以自然地告诉用户"这个码有点模糊，换个角度拍"或者"反光挡住了，调整一下光源"，而不需要用户自己猜测问题出在哪。
+实际场景中二维码质量参差不齐——模糊、反光、太小、对比度不够。MCP 在返回解码结果的同时，也附带了图像质量数据（模糊度、对比度[标准差+ISO15415调制比]、反光比例[空间方差]）和 `result_code`。Agent 拿到这些信息后，可以自然地告诉用户"这个码有点模糊，换个角度拍"或者"反光挡住了，调整一下光源"，也可以直接调用 `auto_enhance` 自动修复。
 
 ---
 
@@ -75,8 +76,9 @@ pip install -e ".[full]"
 |---|---|---|
 | 下载大小 | ~15 MB | ~120 MB |
 | decode_qrcode_full | ✅ | ✅ |
+| auto_enhance | ✅ | ✅ |
 | enhance_and_decode | ✅ | ✅（denoise 稍弱） |
-| 质量指标（blur/contrast/glare） | ✅ | ✅ |
+| 质量指标（blur/contrast/glare/modulation） | ✅ | ✅ |
 | OpenCV 解码回退 | ❌ | ✅ |
 | finder-pattern 检测 | ❌ | ✅ |
 
@@ -129,8 +131,8 @@ python -m qr_reader.server
 | `MAX_IMAGE_SIZE` | `10485760` | 图片大小上限（字节，默认 10 MB） |
 | `MAX_INPUT_PIXELS` | `2560` | 图片长边超过此值自动缩放 |
 | `QR_BLUR_THRESHOLD` | `50.0` | 模糊度阈值，越低越严格 |
-| `QR_CONTRAST_THRESHOLD` | `0.15` | 对比度阈值，越低越严格 |
-| `QR_GLARE_THRESHOLD` | `0.3` | 反光检测阈值，越低越敏感 |
+| `QR_CONTRAST_THRESHOLD` | `0.20` | 对比度阈值（std/128），越低越严格 |
+| `QR_GLARE_THRESHOLD` | `0.10` | 反光检测阈值（空间方差），越低越敏感 |
 
 ---
 
@@ -164,6 +166,7 @@ python -m qr_reader.server
   ],
   "analysis": {
     "total_detected": 1,
+    "modulation": 0.92,
     "quality": {
       "blur_score": 128.5,
       "contrast": 0.72,
@@ -171,7 +174,48 @@ python -m qr_reader.server
       "noise_level": 12.3
     }
   },
-  "suggestion": null
+  "suggestion": null,
+  "image_size": [600, 800],
+  "resize_factor": 1.0
+}
+```
+
+### `auto_enhance`
+
+质量不佳时的一键自动恢复。7 种增强策略有序尝试（upscale / sharpen / contrast / denoise / 组合策略），首次解码成功即返回，无需手动指定 bbox 或 operation。
+
+**输入参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `image_path` | string | 三选一 | 本地图片绝对路径 |
+| `image_base64` | string | 三选一 | Base64 编码的图片 |
+| `image_url` | string | 三选一 | 图片 URL |
+| `bbox` | [int,int,int,int] | 否 | 可选目标区域，不传则处理全图 |
+
+**返回示例（成功）：**
+
+```json
+{
+  "success": true,
+  "applied_strategy": "upscale_2x",
+  "strategies_tried": 1,
+  "result_code": "SUCCESS",
+  "results": [{"content": "https://example.com", "type": "QRCODE"}],
+  "image_size": [96, 96],
+  "resize_factor": 1.0
+}
+```
+
+**返回示例（全部失败）：**
+
+```json
+{
+  "success": false,
+  "applied_strategy": null,
+  "strategies_tried": 7,
+  "result_code": "NO_QR_FOUND",
+  "suggestion": "All 7 enhancement strategies failed to decode a QR code..."
 }
 ```
 
@@ -208,7 +252,7 @@ python -m qr_reader.server
 |---|---|---|
 | `SUCCESS` | 解码成功 | 直接使用内容 |
 | `SUCCESS_WITH_WARNING` | 解码成功但内容可能有异常 | 检查警告，验证内容 |
-| `RETRYABLE` | 质量问题，可修复 | 调用 `enhance_and_decode` 重试 |
+| `RETRYABLE` | 质量问题，可修复 | 调用 `auto_enhance`（推荐）或 `enhance_and_decode` |
 | `NO_QR_FOUND` | 未检测到二维码 | 告知用户图中没有二维码 |
 | `QR_UNRECOVERABLE` | 二维码已损坏无法恢复 | 告知用户二维码损坏 |
 
@@ -227,7 +271,7 @@ python -m qr_reader.server
 
 ## 只读模式
 
-设置 `READ_ONLY_MODE=true` 后，仅保留 `decode_qrcode_full` 工具。此模式下 `enhance_and_decode` 不可用——AI 只能扫描，不能修改图片。
+设置 `READ_ONLY_MODE=true` 后，仅保留 `decode_qrcode_full` 工具。`auto_enhance` 和 `enhance_and_decode` 均不可用——AI 只能扫描，不能修改图片。
 
 适用于审计/日志场景，确保行为确定、无副作用。
 
@@ -235,8 +279,8 @@ python -m qr_reader.server
 
 ## 安全说明
 
-- 本服务只处理你提供的图片，不访问你的文件系统
-- `image_url` 仅用于获取你指定的图片，不做其他网络请求
+- 通过 `image_path` 读取调用方指定的本地图片（仅扩展名白名单过滤）
+- `image_url` 通过四层 SSRF 防御（DNS 解析后 IP 校验 + hostname 黑名单 + 禁用重定向 + scheme 白名单）保护内网安全
 - stdio 模式下无需 API Key 或认证
 - 设置 `MAX_IMAGE_SIZE` 可限制内存占用
 - 日志不记录图片内容和解码数据
@@ -267,20 +311,25 @@ qr-reader-mcp-server/
 ├── src/
 │   └── qr_reader/
 │       ├── __init__.py
-│       ├── server.py          # MCP 入口
+│       ├── server.py          # MCP 入口 + 三工具注册
 │       └── core/
 │           ├── __init__.py
-│           ├── decoder.py     # 二维码解码（基于 pyzbar）
-│           ├── quality.py     # 图像质量分析
-│           ├── diagnosis.py   # 结果分类与详情提取
-│           └── url_utils.py   # SSRF 防护
-└── tests/
-    ├── __init__.py
-    ├── test_decoder.py
-    ├── test_diagnosis.py
-    ├── test_quality.py
-    ├── test_server.py
-    └── test_ssrf.py
+│           ├── decoder.py     # 二维码解码（pyzbar + OpenCV fallback）
+│           ├── ops.py         # 统一图像操作层（cv2 / Pillow 双后端）
+│           ├── quality.py     # 图像质量分析 + ISO 15415 modulation
+│           ├── diagnosis.py   # 五级结果码分类
+│           └── url_utils.py   # 四层 SSRF 防护
+├── tests/
+│   ├── test_decoder.py
+│   ├── test_diagnosis.py
+│   ├── test_e2e.py
+│   ├── test_quality.py
+│   ├── test_server.py
+│   └── test_ssrf.py
+├── benchmarks/                 # pytest-benchmark 性能回归
+├── INSTALL_FOR_AGENT.md        # AI Agent 自动安装指南
+├── CHANGELOG.md
+└── SECURITY.md
 ```
 
 ---
