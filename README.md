@@ -52,35 +52,35 @@ vcpkg install zbar
 ### 安装运行
 
 ```bash
-# 克隆
-git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
-cd qr-reader-mcp-server
+# 推荐：uvx 一行安装（Python 3.10+, 自动处理依赖）
+uvx qr-reader-mcp-server
+
+# 或：git clone + pip 安装
+pip install .            # 基础版（~15 MB）
+pip install ".[full]"   # 全功能版（~120 MB）
 ```
 
 **两种安装方式 — 按需选择：**
 
 ```bash
-# ── 轻量版（推荐给只想扫码拿结果的人）─────────────────────
-# 依赖 ≈15 MB：Pillow + numpy + pyzbar + mcp + requests
-# 功能：decode_qrcode_full + enhance_and_decode 全部保留
-#       增强管道 degrades to Pillow（denoise 效果稍弱）
-pip install -e ".[light]"
+# ── 基础版（推荐，~15 MB）───────────────────────────────
+# pyzbar 解码 + 全部 3 个工具 + 质量诊断
+pip install .
 
-# ── 全功能版（需要最强解码能力的）─────────────────────────
-# 依赖 ≈120 MB：额外包含 opencv-python
-# 功能：轻量版全部功能 + OpenCV 解码回退 + finder-pattern 检测
-pip install -e ".[full]"
+# ── 全功能版（需要最强能力）─────────────────────────────
+# 基础版全部功能 + OpenCV 解码回退 + finder-pattern 畸变检测
+pip install ".[full]"
 ```
 
-| | 轻量版 `[light]` | 全功能版 `[full]` |
+| | 基础版 | 全功能版 `[full]` |
 |---|---|---|
 | 下载大小 | ~15 MB | ~120 MB |
 | decode_qrcode_full | ✅ | ✅ |
 | auto_enhance | ✅ | ✅ |
-| enhance_and_decode | ✅ | ✅（denoise 稍弱） |
-| 质量指标（blur/contrast/glare/modulation） | ✅ | ✅ |
+| enhance_and_decode | ✅ | ✅ |
+| 质量指标（blur/contrast/glare/noise/modulation） | ✅ | ✅ |
+| distortion (finder-pattern 几何畸变) | ❌ | ✅ |
 | OpenCV 解码回退 | ❌ | ✅ |
-| finder-pattern 检测 | ❌ | ✅ |
 
 ```bash
 # 启动（stdio 模式）
@@ -271,7 +271,7 @@ python -m qr_reader.server
 
 ## 只读模式
 
-设置 `READ_ONLY_MODE=true` 后，仅保留 `decode_qrcode_full` 工具。`auto_enhance` 和 `enhance_and_decode` 均不可用——AI 只能扫描，不能修改图片。
+设置 `READ_ONLY_MODE=true` 后，仅保留 `decode_qrcode_full`。`auto_enhance` 和 `enhance_and_decode` 均不可用——AI 只能扫描，不能修改图片。
 
 适用于审计/日志场景，确保行为确定、无副作用。
 
@@ -316,8 +316,9 @@ qr-reader-mcp-server/
 │           ├── __init__.py
 │           ├── decoder.py     # 二维码解码（pyzbar + OpenCV fallback）
 │           ├── ops.py         # 统一图像操作层（cv2 / Pillow 双后端）
-│           ├── quality.py     # 图像质量分析 + ISO 15415 modulation
+|           ├── quality.py     # 图像质量分析 + ISO 15415 modulation
 │           ├── diagnosis.py   # 五级结果码分类
+│           ├── distortion.py  # finder-pattern 几何畸变检测
 │           └── url_utils.py   # 四层 SSRF 防护
 ├── tests/
 │   ├── test_decoder.py

@@ -23,17 +23,19 @@ brew install zbar
 choco install zbar
 ```
 
-## Step 2 — Clone and install
+## Step 2 — Install
 
 ```shell
-git clone --depth 1 https://github.com/Shalim-C/qr-reader-mcp-server.git
-cd qr-reader-mcp-server
+# Recommended: uvx one-liner (PyPI, auto-dependency)
+uvx qr-reader-mcp-server
 
-# Full install (~120 MB) — recommended: OpenCV detection + all enhancements
-pip install -e ".[full]"
+# Or pip install from PyPI:
+pip install qr-reader-mcp-server              # base (~15 MB, pyzbar included)
+pip install "qr-reader-mcp-server[full]"      # full (~120 MB, + OpenCV)
 
-# Or lightweight (~15 MB) — pyzbar-only decoding, all tools still work
-pip install -e .
+# Or git clone for local development:
+pip install .                # base
+pip install ".[full]"        # full
 ```
 
 ## Step 3 — Register with your MCP client
