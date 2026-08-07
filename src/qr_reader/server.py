@@ -13,12 +13,13 @@ import base64
 import json
 import logging
 import os
+from collections.abc import Sequence
 
 import numpy as np
 import requests
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import ImageContent, TextContent, Tool
 
 from qr_reader.core.decoder import (
     clamp_bbox,
@@ -371,7 +372,7 @@ async def list_tools() -> list[Tool]:
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict) -> Sequence[TextContent | ImageContent]:
     logger.info("Tool called: %s", name)
 
     try:
@@ -381,7 +382,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return _error("INTERNAL_ERROR", f"Unexpected error: {exc}")
 
 
-async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
+async def _handle_tool(name: str, arguments: dict) -> Sequence[TextContent | ImageContent]:
     # ── decode_qrcode_full ────────────────────────────────────────────────
     if name == "decode_qrcode_full":
         try:
@@ -534,7 +535,10 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
                 **resize_info,
             }
             logger.info("auto_enhance → success without enhancement")
-            return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
+            return [
+                TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2)),
+                ImageContent(type="image", data=img_to_base64(region_img), mimeType="image/png"),
+            ]
 
         # -- Try each enhancement strategy sequentially --------------------
         strategies_tried = 0
@@ -557,7 +561,10 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
                 if bbox_used:
                     response["bbox_used"] = bbox_used
                 logger.info("auto_enhance → success with %s (attempt %d)", strategy_name, strategies_tried)
-                return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
+                return [
+                    TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2)),
+                    ImageContent(type="image", data=img_to_base64(enhanced), mimeType="image/png"),
+                ]
 
             # Keep the best diagnostic for the final report
             qr_detected = detect_qr_regions(enhanced)
