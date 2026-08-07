@@ -219,6 +219,9 @@ def load_image(
             "Fetching image from URL: %s (pinned to %s)", image_url[:120], pinned_ip
         )
         session = requests.Session()
+        # trust_env=False: 忽略 HTTP(S)_PROXY 环境变量，否则请求会走
+        # ProxyManager，DNS 解析权交回代理，IP pinning 被绕过。
+        session.trust_env = False
         session.mount("http://", _PinnedIPAdapter(pinned_ip))
         session.mount("https://", _PinnedIPAdapter(pinned_ip))
         try:

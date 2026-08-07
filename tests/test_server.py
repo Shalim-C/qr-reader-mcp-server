@@ -422,3 +422,27 @@ class TestImageUrlDownload:
         for scheme, adapter in mounts:
             assert isinstance(adapter, _PinnedIPAdapter), f"{scheme} 未使用 pinned adapter"
             assert adapter._pinned_ip == "93.184.216.34"
+
+    def test_url_session_ignores_proxy_env(self, mocker):
+        """trust_env=False — HTTP(S)_PROXY 环境变量不得绕过 IP pinning
+        （代理会重新解析 DNS，把解析权交回给不受控的一方）。"""
+        from qr_reader.server import load_image
+
+        mocker.patch(
+            "qr_reader.server.resolve_image_host",
+            return_value=("example.com", 443, "93.184.216.34"),
+        )
+        img = Image.new("RGB", (1, 1), color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        png = buf.getvalue()
+        real_session = requests.Session()
+        mock_resp = mocker.MagicMock()
+        mock_resp.iter_content = lambda chunk_size: [png]
+        mock_resp.raise_for_status = lambda: None
+        mocker.patch.object(real_session, "get", return_value=mock_resp)
+        mocker.patch("qr_reader.server.requests.Session", return_value=real_session)
+
+        load_image(image_url="https://example.com/qr.png")
+
+        assert real_session.trust_env is False
