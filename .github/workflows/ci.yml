@@ -44,6 +44,20 @@ jobs:
       - name: Run ruff
         run: python -m ruff check src/ tests/
 
+      - name: Verify version consistency
+        run: |
+          python -c "
+          import re
+          with open('pyproject.toml', encoding='utf-8') as f:
+              m = re.search(r'version\s*=\s*\"(.+?)\"', f.read())
+              pt = m.group(1) if m else 'MISSING'
+          with open('src/qr_reader/__init__.py', encoding='utf-8') as f:
+              m = re.search(r'__version__\s*=\s*\"(.+?)\"', f.read())
+              init = m.group(1) if m else 'MISSING'
+          assert pt == init, f'Version mismatch: pyproject={pt} __init__={init}'
+          print(f'Version OK: {pt}')
+          "
+
       - name: Run mypy
         run: python -m mypy src/ --ignore-missing-imports
         continue-on-error: ${{ runner.os == 'macOS' }}
@@ -81,6 +95,12 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t qr-reader-mcp-server .
+
+      - name: Smoke test (MCP initialize handshake)
+        run: |
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci-smoke","version":"1"}}}' \
+            | timeout 10 docker run -i --rm qr-reader-mcp-server \
+            | grep -q '"serverInfo"' && echo "[OK] MCP handshake passed"
 
   benchmark:
     runs-on: ubuntu-latest
