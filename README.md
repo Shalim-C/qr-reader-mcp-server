@@ -165,6 +165,7 @@ python -m qr_reader.server
 | `READ_ONLY_MODE` | `false` | 设为 `true` 禁用 `enhance_and_decode`（仅保留 `decode_qrcode_full`） |
 | `MAX_IMAGE_SIZE` | `10485760` | 图片大小上限（字节，默认 10 MB） |
 | `MAX_INPUT_PIXELS` | `4096` | 图片长边超过此值自动缩放 |
+| `MAX_OUTPUT_PIXELS` | `16384` | 增强管线单步输出长边上限（upscale 超限即拒绝，防链式放大 OOM） |
 | `QR_BLUR_THRESHOLD` | `50.0` | Laplacian 方差归一化阈值（模糊贡献 = 阈值 ÷ 实际方差） |
 | `QR_CONTRAST_PERFECT` | `0.50` | 对比度归一化锚点（实际对比度越接近此值越健康） |
 | `QR_MODULATION_PERFECT` | `0.70` | ISO 15415 调制比归一化锚点 |
@@ -323,7 +324,7 @@ python -m qr_reader.server
 ## 安全说明
 
 - 通过 `image_path` 读取调用方指定的本地图片（仅扩展名白名单过滤）
-- `image_url` 通过四层 SSRF 防御（DNS 解析后 IP 校验 + hostname 黑名单 + 禁用重定向 + scheme 白名单）保护内网安全
+- `image_url` 通过五层 SSRF 防御（单次 DNS 解析 + 连接钉定到校验 IP + hostname 黑名单 + 禁用重定向 + scheme 白名单）保护内网安全
 - stdio 模式下无需 API Key 或认证
 - 设置 `MAX_IMAGE_SIZE` 可限制内存占用
 - 日志不记录图片内容和解码数据

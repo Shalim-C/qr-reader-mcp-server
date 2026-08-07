@@ -27,7 +27,7 @@ git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
 pip install -e ".[full]"   # 推荐：包含 OpenCV + 全部增强
 # 或
-# pip install -e ".[light]"  # 轻量版：仅 pyzbar，auto_enhance 仍可用
+# pip install -e "."  # 基础版：仅 pyzbar（不含 opencv），auto_enhance 仍可用
 ```
 
 ### 方式二：从 PyPI 安装（后续）
@@ -109,6 +109,7 @@ pip install qr-reader-mcp-server
 | `READ_ONLY_MODE` | `false` | 设为 `true` 禁用 `auto_enhance` 和 `enhance_and_decode` |
 | `MAX_IMAGE_SIZE` | `10485760` | 图片大小上限（字节，默认 10 MB） |
 | `MAX_INPUT_PIXELS` | `4096` | 图片长边超过此值自动缩放 |
+| `MAX_OUTPUT_PIXELS` | `16384` | 增强管线单步输出长边上限（upscale 超限即拒绝，防链式放大 OOM） |
 | `QR_BLUR_THRESHOLD` | `50.0` | Laplacian 方差归一化阈值（模糊贡献 = 阈值 ÷ 实际方差） |
 | `QR_CONTRAST_PERFECT` | `0.50` | 对比度归一化锚点（实际对比度越接近此值越健康） |
 | `QR_MODULATION_PERFECT` | `0.70` | ISO 15415 调制比归一化锚点 |

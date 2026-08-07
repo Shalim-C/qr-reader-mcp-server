@@ -18,18 +18,18 @@
 ### 网络访问
 
 - `image_url` 支持 HTTP 和 HTTPS。服务不会发起任意网络请求——只请求你提供的 URL。
-- SSRF 防护：scheme 白名单（http/https only）+ DNS 解析后逐 IP 校验（拦截私有/回环/保留地址）+ 域名黑名单（云元数据端点等）+ 禁止 HTTP 重定向。
-- `MAX_IMAGE_SIZE` 配合流式下载在下载阶段即拦截超大文件，防止内存耗尽。
+- SSRF 防护：scheme 白名单（http/https only）+ **单次 DNS 解析**（校验与请求共用同一 DNS 答案）+ 连接钉定到校验过的公网 IP（防 resolve-twice rebinding）+ 域名黑名单（云元数据端点等）+ 禁止 HTTP 重定向。
+- `MAX_IMAGE_SIZE` 配合流式下载在下载阶段即拦截超大文件，防止内存耗尽；增强管线另设 `MAX_OUTPUT_PIXELS` 输出长边上限，防链式放大 OOM。
 
 ### 攻击面
 
 | 风险 | 缓解措施 |
 |---|---|
 | 畸形图片导致崩溃 | Pillow/OpenCV 处理大多数情况；图片加载异常返回 IMAGE_LOAD_FAILED；其他未预期异常由全局兜底返回 INTERNAL_ERROR |
-| image_url SSRF | scheme 白名单（http/https only）+ DNS 解析后全量 IP 校验 + 内网/回环/保留地址黑名单 + 域名黑名单 + 禁止 HTTP 重定向 |
+| image_url SSRF | scheme 白名单（http/https only）+ 单次 DNS 解析 + 连接钉定到校验过的公网 IP + 内网/回环/保留地址黑名单 + 域名黑名单 + 禁止 HTTP 重定向 |
 | Base64 炸弹（超大载荷） | `MAX_IMAGE_SIZE` 限制解码后图片大小 |
 | pyzbar 库崩溃 | 解码/诊断路径异常由全局 try/except 捕获，返回 INTERNAL_ERROR |
-| 内存耗尽 | `MAX_IMAGE_SIZE`（默认 10 MB）+ 流式下载逐块检查 + 单图处理 |
+| 内存耗尽 | `MAX_IMAGE_SIZE`（默认 10 MB）+ 流式下载逐块检查 + 增强管线 `MAX_OUTPUT_PIXELS`（默认 16384/边）单步超限拒绝 + 单图处理 |
 
 ### 认证
 

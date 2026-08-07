@@ -23,10 +23,6 @@ Windows 上推荐通过 choco 安装 zbar（CI 验证方案）：
 ```cmd
 choco install zbar
 ```
-如果使用 vcpkg 安装，需要额外设置 `ZBAR_PATH` 环境变量：
-```cmd
-set ZBAR_PATH=C:\path\to\vcpkg\installed\x64-windows\bin
-```
 
 ### "IMAGE_LOAD_FAILED"（图片加载失败）
 
