@@ -45,6 +45,7 @@ jobs:
         run: python -m ruff check src/ tests/
 
       - name: Verify version consistency
+        shell: bash
         run: |
           python -c "
           import re
