@@ -40,6 +40,16 @@ class TestIsPrivateUrl:
         ])
         assert is_private_url("https://github.com/raw/repo/main/qr.png") is False
 
+    def test_dns_resolution_failure_blocked(self, mocker):
+        """Resolution failure must fail closed.
+
+        An attacker-controlled DNS can fail the validation lookup and
+        return a private IP on the request lookup — resolve-twice
+        rebinding. Blocking on gaierror closes that window."""
+        import socket
+        mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror("mock resolution failure"))
+        assert is_private_url("http://attacker.example/img.png") is True
+
     # --- DNS rebinding / domain-based bypass ---------------------------------
 
     def test_localtest_me_blocked(self, mocker):

@@ -82,7 +82,11 @@ def is_private_url(url: str) -> bool:
     try:
         addrinfo = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
-        return False
+        # Resolution failure → block. An attacker-controlled DNS server
+        # can fail the first resolution (passing the check) and return a
+        # private IP on the second (the actual request) — "resolve twice"
+        # would otherwise open that window. Conservative: fail closed.
+        return True
 
     for item in addrinfo:
         ip_str = item[4][0]

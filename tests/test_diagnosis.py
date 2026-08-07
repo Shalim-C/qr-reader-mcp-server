@@ -1,7 +1,12 @@
 """Tests for diagnosis module — mocks quality to isolate classification logic."""
 
+from typing import ClassVar
+
+import pytest
+
 from qr_reader.core.diagnosis import (
     _check_warning,
+    _compute_quality_score,
     classify_result,
     diagnose_single_result,
 )
@@ -160,3 +165,35 @@ class TestClassifyResult:
         assert info["result_code"] == "RETRYABLE"
         # Weighted fusion always derives primary_issue from metrics
         assert info["analysis"]["primary_issue"] is not None
+
+
+# ---------------------------------------------------------------------------
+# leg_penalty anchor semantics — QR_LEG_RATIO_MIN
+# ---------------------------------------------------------------------------
+
+class TestLegPenaltyAnchor:
+    """The leg-ratio anchor must behave as documented: leg_ratio=0.60
+    (QR_LEG_RATIO_MIN) is the worst case (penalty 1.0), 1.0 is the
+    healthy case (penalty 0). Guards against the parenthesization
+    regression where penalty stayed 0 across [0.4, 1.0]."""
+
+    QUALITY: ClassVar[dict] = {"blur_score": 200.0, "contrast": 0.8, "glare_ratio": 0.02, "noise_level": 5.0}
+
+    def _distortion_contrib(self, leg_ratio: float) -> float:
+        fusion = _compute_quality_score(
+            self.QUALITY,
+            distortion={"right_angle_deviation": 0.0, "leg_ratio": leg_ratio},
+            modulation=None,
+        )
+        return fusion["contributions"]["distortion"]
+
+    def test_healthy_leg_ratio_no_penalty(self):
+        assert self._distortion_contrib(1.0) == pytest.approx(0.0)
+
+    def test_anchor_leg_ratio_max_penalty(self):
+        # leg_ratio=0.60 → (1-0.6)/0.4 = 1.0 → distortion contrib = 0.5*1.0
+        assert self._distortion_contrib(0.6) == pytest.approx(0.5)
+
+    def test_mid_leg_ratio_half_penalty(self):
+        # leg_ratio=0.80 → (1-0.8)/0.4 = 0.5 → distortion contrib = 0.5*0.5
+        assert self._distortion_contrib(0.8) == pytest.approx(0.25)

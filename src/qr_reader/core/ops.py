@@ -16,6 +16,7 @@ When cv2 is absent:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import numpy as np
@@ -265,13 +266,24 @@ def noise_level(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
 # ---------------------------------------------------------------------------
 
 def op_upscale(arr: np.ndarray, scale: float) -> np.ndarray:
-    """Scale image by factor. scale ∈ [1.0, 8.0]."""
+    """Scale image by factor. scale ∈ [1.0, 8.0].
+
+    Guards the output size: chained upscales are capped at
+    MAX_OUTPUT_PIXELS per edge, otherwise a 5-step pipeline could
+    amplify an image by 8^5 = 32768x and exhaust memory.
+    """
+    h, w = arr.shape[:2]
+    new_w, new_h = int(w * scale), int(h * scale)
+    max_out = int(os.getenv("MAX_OUTPUT_PIXELS", "16384"))
+    if new_w > max_out or new_h > max_out:
+        raise ValueError(
+            f"upscale to {new_w}x{new_h} would exceed MAX_OUTPUT_PIXELS "
+            f"({max_out}px per edge) — reduce scale or crop first"
+        )
     if _CV2_AVAILABLE:
         import cv2
         return cv2.resize(arr, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     _ensure_pillow()
-    h, w = arr.shape[:2]
-    new_w, new_h = int(w * scale), int(h * scale)
     img = _PIL_IMAGE.fromarray(arr)
     return np.array(img.resize((new_w, new_h), _PIL_IMAGE.LANCZOS))
 

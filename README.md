@@ -95,13 +95,34 @@ pip install ".[full]"
 | OpenCV 解码回退 | ❌ | ✅ |
 
 ```bash
-# 启动（stdio 模式）
+# uvx 安装 → 启动（stdio 模式）
+uvx qr-reader-mcp-server
+# 或 pip 安装后启动
 python -m qr_reader.server
 ```
 
 ### MCP 客户端配置
 
 **Claude Desktop / VS Code Copilot / Cursor：**
+
+按你的安装方式选一个。用 uvx 安装（推荐）：
+
+```json
+{
+  "mcpServers": {
+    "qr-reader": {
+      "command": "uvx",
+      "args": ["qr-reader-mcp-server"],
+      "env": {
+        "LOG_LEVEL": "info",
+        "READ_ONLY_MODE": "false"
+      }
+    }
+  }
+}
+```
+
+用 pip 安装：
 
 ```json
 {
@@ -117,6 +138,8 @@ python -m qr_reader.server
   }
 }
 ```
+
+> ⚠️ 两种配置不能混用：uvx 隔离环境下 `python -m qr_reader.server` 找不到包；pip 环境下 `uvx` 会重新拉取而不是用本地安装。
 
 **Docker：**
 
@@ -167,6 +190,8 @@ python -m qr_reader.server
 | `image_url` | string | 三选一 | 图片 URL |
 
 **返回示例：**
+
+> `blur_score` 是拉普拉斯方差：**数值越大图像越清晰**（高对比度边缘多），越小越模糊。`contrast` 是归一化标准差，越大对比度越高。两者方向相反，Agent 集成时请注意。
 
 ```json
 {
@@ -287,9 +312,11 @@ python -m qr_reader.server
 
 ## 只读模式
 
-设置 `READ_ONLY_MODE=true` 后，仅保留 `decode_qrcode_full`。`auto_enhance` 和 `enhance_and_decode` 均不可用——AI 只能扫描，不能修改图片。
+设置 `READ_ONLY_MODE=true` 后，仅保留 `decode_qrcode_full`。`auto_enhance` 和 `enhance_and_decode` 均不可用——AI 只能扫描，不能运行增强管线。
 
-适用于审计/日志场景，确保行为确定、无副作用。
+> 注意：只读模式是**行为约束**，不是安全边界——三个工具本就不写磁盘、不改动文件，增强操作也只在内存中计算。它控制的是"AI 能调用哪些工具"，而非"进程能否产生副作用"。
+
+适用于审计/日志场景，避免 Agent 对图像执行计算密集的增强重试。
 
 ---
 
@@ -332,7 +359,7 @@ qr-reader-mcp-server/
 │           ├── __init__.py
 │           ├── decoder.py     # 二维码解码（pyzbar + OpenCV fallback）
 │           ├── ops.py         # 统一图像操作层（cv2 / Pillow 双后端）
-|           ├── quality.py     # 图像质量分析 + ISO 15415 modulation
+│           ├── quality.py     # 图像质量分析 + ISO 15415 modulation
 │           ├── diagnosis.py   # 五级结果码分类
 │           ├── distortion.py  # finder-pattern 几何畸变检测
 │           └── url_utils.py   # 四层 SSRF 防护

@@ -190,6 +190,19 @@ class TestApplyOperations:
         assert 10 <= h <= 17  # 1.61×10 ≈ 16.1 → int rounding
         assert 10 <= w <= 17
 
+    def test_upscale_guard_rejects_oversized_output(self):
+        """Chained upscale amplification must be rejected (OOM guard).
+
+        A single upscale that would push an edge past MAX_OUTPUT_PIXELS
+        (default 16384) raises instead of allocating unbounded memory.
+        """
+        from qr_reader.core.ops import op_upscale
+
+        big = np.zeros((3000, 3000, 3), dtype=np.uint8)
+        with pytest.raises(ValueError, match="MAX_OUTPUT_PIXELS"):
+            op_upscale(big, 8.0)  # 3000×8 = 24000 > 16384
+
+
 
 # ---------------------------------------------------------------------------
 # image_to_base64

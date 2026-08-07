@@ -104,7 +104,7 @@ def _compute_quality_score(
         angle_dev = distortion.get("right_angle_deviation", 0.0)
         leg_ratio = distortion.get("leg_ratio", 1.0)
         angle_penalty = min(1.0, angle_dev / ANGLE_MAX)
-        leg_penalty = max(0.0, min(1.0, 1.0 - leg_ratio / (1.0 - LEG_RATIO_MIN)))
+        leg_penalty = max(0.0, min(1.0, (1.0 - leg_ratio) / (1.0 - LEG_RATIO_MIN)))
         contrib["distortion"] = round(0.5 * angle_penalty + 0.5 * leg_penalty, 4)
     else:
         contrib["distortion"] = 0.0  # no data → don't penalize

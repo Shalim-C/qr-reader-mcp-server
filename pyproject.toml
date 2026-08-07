@@ -1,6 +1,6 @@
 [project]
 name = "qr-reader-mcp-server"
-version = "0.2.0"
+version = "0.2.1"
 description = "An MCP server that decodes QR codes from images — returns detailed quality metrics and failure reasons so AI agents can self-correct."
 readme = "README.md"
 requires-python = ">=3.10"

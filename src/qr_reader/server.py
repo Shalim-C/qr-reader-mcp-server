@@ -89,6 +89,13 @@ def load_image(
             )
         if not os.path.isfile(image_path):
             raise ValueError(f"Image file not found: {image_path}")
+        # Pre-check size via stat before reading into memory — a huge
+        # file (e.g. 2 GB png) must be rejected without full allocation.
+        size = os.path.getsize(image_path)
+        if size > MAX_IMAGE_SIZE:
+            raise ValueError(
+                f"Image size {size} bytes exceeds limit of {MAX_IMAGE_SIZE} bytes"
+            )
         with open(image_path, "rb") as f:
             img_bytes = f.read()
     elif image_base64:
@@ -144,10 +151,12 @@ def img_to_base64(arr: np.ndarray) -> str:
 _ENHANCE_BOUNDS: dict[str, dict[str, tuple[float, float, float]]] = {
     "upscale":         {"scale":        (1.0, 8.0, 2.0)},
     "sharpen":         {"strength":     (0.3, 5.0, 1.5)},
-    "adjust_contrast": {"alpha":        (0.5, 3.0, 1.5)},
+    "adjust_contrast": {"alpha":        (0.5, 3.0, 1.5),
+                        "beta":         (-255.0, 255.0, 0.0)},
     "denoise":         {"h":            (3, 30, 10)},
 }
 _MAX_OPERATIONS = 5
+_MAX_REGIONS = 16
 
 # ── auto_enhance strategies (ordered: simpler first, combos last) ──────
 _AUTO_ENHANCE_STRATEGIES = [
@@ -455,6 +464,11 @@ async def _handle_tool(name: str, arguments: dict) -> Sequence[TextContent | Ima
             bboxes = bbox_raw
         else:
             return _error("INVALID_BBOX", "bbox must be [x, y, width, height] or [[x,y,w,h], ...]")
+        if len(bboxes) > _MAX_REGIONS:
+            return _error(
+                "INVALID_BBOX",
+                f"Too many regions ({len(bboxes)}); maximum is {_MAX_REGIONS}",
+            )
 
         all_results: list[dict] = []
         for bi, bbox in enumerate(bboxes):
@@ -619,7 +633,7 @@ def _check_prerequisites() -> None:
         logger.warning(
             "pyzbar not found — install system zbar library: "
             "apt install libzbar0 (Linux) / brew install zbar (macOS) / "
-            "vcpkg install zbar (Windows)"
+            "choco install zbar (Windows)"
         )
 
 
