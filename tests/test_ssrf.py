@@ -2,7 +2,7 @@
 
 import pytest
 
-from qr_reader.core.url_utils import is_private_url
+from qr_reader.core.url_utils import is_private_url, resolve_image_host
 
 
 class TestIsPrivateUrl:
@@ -97,3 +97,50 @@ class TestIsPrivateUrl:
     ])
     def test_non_http_schemes_blocked(self, url):
         assert is_private_url(url) is True
+
+
+class TestResolveImageHost:
+    """resolve_image_host: single DNS lookup, shared by validation and
+    the pinned connection (closes the resolve-twice TOCTOU window)."""
+
+    def test_returns_hostname_port_and_public_ip(self, mocker):
+        """Successful resolution returns the values used for the request."""
+        mocker.patch("socket.getaddrinfo", return_value=[
+            (2, 0, 0, "", ("140.82.121.3", 0)),  # family, type, proto, canon, sockaddr
+        ])
+        host, port, ip = resolve_image_host("https://github.com/raw/qr.png")
+        assert host == "github.com"
+        assert port == 443
+        assert ip == "140.82.121.3"
+
+    def test_default_http_port(self, mocker):
+        mocker.patch("socket.getaddrinfo", return_value=[
+            (2, 0, 0, "", ("93.184.216.34", 0)),
+        ])
+        _, port, _ = resolve_image_host("http://example.com/qr.png")
+        assert port == 80
+
+    def test_private_ip_in_result_rejected(self, mocker):
+        """A private IP anywhere in the result set rejects the whole URL
+        (DNS rebinding) — the exception message names the IP."""
+        mocker.patch("socket.getaddrinfo", return_value=[
+            (2, 0, 0, "", ("140.82.121.3", 0)),
+            (2, 0, 0, "", ("10.0.0.1", 0)),   # rebinding target sneaks in
+        ])
+        with pytest.raises(ValueError, match=r"10\.0\.0\.1"):
+            resolve_image_host("http://attacker.example/img.png")
+
+    def test_resolution_failure_fails_closed(self, mocker):
+        """gaierror must raise (block), never return an unchecked state."""
+        import socket
+        mocker.patch("socket.getaddrinfo", side_effect=socket.gaierror("mock failure"))
+        with pytest.raises(ValueError, match="could not resolve"):
+            resolve_image_host("http://attacker.example/img.png")
+
+    def test_private_ip_literal_rejected(self):
+        with pytest.raises(ValueError, match="private"):
+            resolve_image_host("http://192.168.1.1/img.png")
+
+    def test_blocked_hostname_rejected(self):
+        with pytest.raises(ValueError, match="blocked"):
+            resolve_image_host("http://metadata.google.internal/")

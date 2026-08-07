@@ -79,7 +79,10 @@ class TestLoadImage:
         assert img.shape == (10, 10, 3)
 
     def test_load_from_url(self, mocker):
-        mock_get = mocker.patch("qr_reader.server.requests.get")
+        mocker.patch(
+            "qr_reader.server.resolve_image_host",
+            return_value=("example.com", 443, "93.184.216.34"),
+        )
         img = Image.new("RGB", (5, 5), color="red")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -87,12 +90,19 @@ class TestLoadImage:
         mock_resp = mocker.MagicMock()
         mock_resp.iter_content = lambda chunk_size: [data]
         mock_resp.raise_for_status = lambda: None
-        mock_get.return_value = mock_resp
+        mock_session = mocker.MagicMock()
+        mock_session.get.return_value = mock_resp
+        mocker.patch("qr_reader.server.requests.Session", return_value=mock_session)
         result, _ = load_image(image_url="https://example.com/qr.png")
         assert result.shape == (5, 5, 3)
 
     def test_rejects_private_url(self, mocker):
-        mocker.patch("qr_reader.server.is_private_url", return_value=True)
+        mocker.patch(
+            "qr_reader.server.resolve_image_host",
+            side_effect=ValueError(
+                "hostname 'localhost' is a private/internal address"
+            ),
+        )
         with pytest.raises(ValueError, match="internal"):
             load_image(image_url="http://localhost/img.png")
 
@@ -332,16 +342,21 @@ class TestCallToolEnhanceAndDecode:
 
 class TestImageUrlDownload:
     def test_url_redirect_blocked(self, mocker):
-        """is_private_url check + allow_redirects=False prevents redirects."""
+        """DNS pinning + allow_redirects=False prevents redirects."""
         from qr_reader.server import load_image
 
-        mocker.patch("qr_reader.server.is_private_url", return_value=False)
+        mocker.patch(
+            "qr_reader.server.resolve_image_host",
+            return_value=("short.link", 443, "93.184.216.34"),
+        )
         mock_resp = mocker.MagicMock()
         mock_resp.status_code = 302
         mock_resp.headers = {"Location": "https://malicious.internal/"}
         # 302 page body is HTML, not an image → imdecode fails
         mock_resp.iter_content.return_value = [b"<html>redirect</html>"]
-        mocker.patch("requests.get", return_value=mock_resp)
+        mock_session = mocker.MagicMock()
+        mock_session.get.return_value = mock_resp
+        mocker.patch("qr_reader.server.requests.Session", return_value=mock_session)
 
         with pytest.raises(ValueError, match="Failed to decode image"):
             load_image(image_url="https://short.link/qr.png")
@@ -350,11 +365,16 @@ class TestImageUrlDownload:
         """Streaming download cuts off at MAX_IMAGE_SIZE."""
         from qr_reader.server import load_image
 
-        mocker.patch("qr_reader.server.is_private_url", return_value=False)
+        mocker.patch(
+            "qr_reader.server.resolve_image_host",
+            return_value=("example.com", 443, "93.184.216.34"),
+        )
         mock_resp = mocker.MagicMock()
         mock_resp.status_code = 200
         mock_resp.iter_content.return_value = [b"x" * 1048576] * 11
-        mocker.patch("requests.get", return_value=mock_resp)
+        mock_session = mocker.MagicMock()
+        mock_session.get.return_value = mock_resp
+        mocker.patch("qr_reader.server.requests.Session", return_value=mock_session)
         mocker.patch("qr_reader.server.MAX_IMAGE_SIZE", 10485760)
 
         with pytest.raises(ValueError, match="Image size exceeds limit"):
@@ -364,8 +384,41 @@ class TestImageUrlDownload:
         """Request timeout raises cleanly."""
         from qr_reader.server import load_image
 
-        mocker.patch("qr_reader.server.is_private_url", return_value=False)
-        mocker.patch("requests.get", side_effect=requests.Timeout)
+        mocker.patch(
+            "qr_reader.server.resolve_image_host",
+            return_value=("example.com", 443, "93.184.216.34"),
+        )
+        mock_session = mocker.MagicMock()
+        mock_session.get.side_effect = requests.Timeout
+        mocker.patch("qr_reader.server.requests.Session", return_value=mock_session)
 
         with pytest.raises(requests.Timeout):
             load_image(image_url="https://example.com/slow.png")
+
+    def test_url_fetch_pins_connection_to_resolved_ip(self, mocker):
+        """The fetch must connect to the IP returned by resolve_image_host
+        (DNS pinning) — never re-resolve the hostname for the request."""
+        from qr_reader.server import _PinnedIPAdapter, load_image
+
+        mocker.patch(
+            "qr_reader.server.resolve_image_host",
+            return_value=("example.com", 443, "93.184.216.34"),
+        )
+        img = Image.new("RGB", (1, 1), color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        png = buf.getvalue()
+        mock_resp = mocker.MagicMock()
+        mock_resp.iter_content = lambda chunk_size: [png]
+        mock_resp.raise_for_status = lambda: None
+        mock_session = mocker.MagicMock()
+        mock_session.get.return_value = mock_resp
+        mocker.patch("qr_reader.server.requests.Session", return_value=mock_session)
+
+        load_image(image_url="https://example.com/qr.png")
+
+        mounts = [c.args for c in mock_session.mount.call_args_list]
+        assert mounts, "session.mount 应被调用（http/https 各一次）"
+        for scheme, adapter in mounts:
+            assert isinstance(adapter, _PinnedIPAdapter), f"{scheme} 未使用 pinned adapter"
+            assert adapter._pinned_ip == "93.184.216.34"

@@ -47,50 +47,71 @@ def _is_private_ip(ip_str: str) -> bool:
     )
 
 
-def is_private_url(url: str) -> bool:
-    """Check whether a URL targets an internal/private address.
+def resolve_image_host(url: str) -> tuple[str, int, str]:
+    """Resolve a URL's hostname **once** and return (hostname, port, public_ip).
 
-    Returns True if the URL should be blocked.
+    The validation and the returned IP come from the same DNS resolution,
+    so the subsequent request cannot be rebound to a different (private)
+    address — this closes the DNS-rebinding TOCTOU window (validate with
+    one lookup, connect with another).
 
-    Layers:
-      1. Scheme must be http or https.
-      2. Hostname in known blocklist → blocked.
-      3. If hostname is an IP literal → validate directly.
-      4. If hostname is a domain → resolve DNS and validate every IP.
+    Raises ValueError with a human-readable reason when the URL must be
+    blocked (bad scheme, blocked/private hostname, resolution failure,
+    or any resolved IP being private).
+
+    The caller is expected to pin the HTTP connection to the returned IP
+    while keeping the original hostname for the Host header, SNI and TLS
+    certificate verification.
     """
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
-        return True
+        raise ValueError(f"scheme '{parsed.scheme}' not allowed (http/https only)")
 
     hostname = parsed.hostname
     if not hostname:
-        return True
+        raise ValueError("URL has no hostname")
 
     # -- Block known internal hostnames -----------------------------------
     if hostname.lower() in _BLOCKED_HOSTNAMES:
-        return True
+        raise ValueError(f"hostname '{hostname}' is blocked")
 
     # -- Direct IP literal ------------------------------------------------
     if _is_private_ip(hostname):
-        return True
+        raise ValueError(f"hostname '{hostname}' is a private/internal address")
 
-    # -- DNS resolution ---------------------------------------------------
-    # Resolve the hostname and check every returned IP.  A single private
-    # IP in the result set means the URL is dangerous (DNS rebinding).
-    # If resolution fails, we don't block — the subsequent HTTP request
-    # will also fail, so there's no practical attack window.
+    # -- DNS resolution (single lookup, used for both check and connect) --
     try:
-        addrinfo = socket.getaddrinfo(hostname, None)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        raise ValueError(f"invalid port in URL '{url}'") from None
+
+    try:
+        addrinfo = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
     except socket.gaierror:
-        # Resolution failure → block. An attacker-controlled DNS server
-        # can fail the first resolution (passing the check) and return a
-        # private IP on the second (the actual request) — "resolve twice"
-        # would otherwise open that window. Conservative: fail closed.
+        raise ValueError(f"could not resolve hostname '{hostname}'") from None
+
+    ips = [str(item[4][0]) for item in addrinfo]
+    if not ips:
+        raise ValueError(f"no addresses resolved for hostname '{hostname}'")
+
+    # A single private IP in the result set means the URL is dangerous
+    # (DNS rebinding) — reject the whole set.
+    for ip in ips:
+        if _is_private_ip(str(ip)):
+            raise ValueError(f"resolved address '{ip}' is private/internal")
+
+    return hostname, port, ips[0]
+
+
+def is_private_url(url: str) -> bool:
+    """Check whether a URL targets an internal/private address.
+
+    Returns True if the URL should be blocked. Implemented on top of
+    ``resolve_image_host`` so the two share the exact same validation
+    logic and there is only one code path.
+    """
+    try:
+        resolve_image_host(url)
+        return False
+    except ValueError:
         return True
-
-    for item in addrinfo:
-        ip_str = item[4][0]
-        if _is_private_ip(str(ip_str)):
-            return True
-
-    return False

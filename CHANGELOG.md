@@ -4,11 +4,12 @@ All notable changes to QR Reader MCP Server will be documented in this file.
 
 ## [0.2.1] - 2026-08-08
 
-依据第四轮独立质量评审（13 项发现清单）修复 11 项安全/正确性/一致性问题。
+依据第四轮独立质量评审（13 项发现清单）修复 12 项安全/正确性/一致性问题（#3 结果码体系由作者端到端测试后另行设计）。
 
 ### 安全
 - **#1 upscale 链式放大 OOM 护栏（高）** — `op_upscale` 新增 `MAX_OUTPUT_PIXELS` 输出长边上限（默认 16384，env 可调）。此前 5 步管线最坏放大 8⁵=32768 倍，两步即可分配 ~206 GB 内存；SECURITY.md 声称的内存缓解不覆盖该路径（文档与代码脱节，已修复）
-- **#4 DNS 解析失败 fail-closed（低）** — `is_private_url` 的 `gaierror` 分支从放行改为拒绝，封堵"校验解析失败、请求解析返回内网 IP"的两次解析竞态窗口
+- **#2 DNS rebinding TOCTOU（中）** — 消除"校验一次解析、请求又一次解析"的竞态窗口：新增 `resolve_image_host()` 只解析一次（校验与连接共用同一 DNS 答案），请求通过自定义 `_PinnedIPAdapter` 把 TCP 连接钉死在解析出的公网 IP 上，Host 头 / SNI / TLS 证书校验仍用原 hostname。私有 URL、解析失败均 fail-closed。实测钉定连接 + 保留 Host 头（本地服务器受控实验 + example.com 真实 TLS 握手 200）
+- **#4 DNS 解析失败 fail-closed（低）** — `is_private_url` 的 `gaierror` 分支从放行改为拒绝，封堵"校验解析失败、请求解析返回内网 IP"的两次解析竞态窗口（现统一由 `resolve_image_host` 承担）
 - **#6 解码内容不可信提示（低）** — SECURITY.md 明确"解码内容应视为不可信数据"，提示集成方勿将 `content` 当指令执行
 
 ### 正确性

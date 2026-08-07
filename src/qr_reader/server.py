@@ -14,12 +14,18 @@ import json
 import logging
 import os
 from collections.abc import Sequence
+from functools import partial
 
 import numpy as np
 import requests
+import requests.adapters
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ImageContent, TextContent, Tool
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.poolmanager import PoolManager
+from urllib3.util.connection import create_connection
 
 from qr_reader.core.decoder import (
     clamp_bbox,
@@ -40,7 +46,7 @@ from qr_reader.core.ops import (
     op_sharpen,
     op_upscale,
 )
-from qr_reader.core.url_utils import is_private_url
+from qr_reader.core.url_utils import resolve_image_host
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -65,6 +71,103 @@ except ImportError:
     __version__ = "0.0.0"
 
 app = Server("qr-reader-mcp-server")
+
+
+# ---------------------------------------------------------------------------
+# DNS-pinning HTTP transport (SSRF: close the resolve-twice TOCTOU window)
+# ---------------------------------------------------------------------------
+
+class _PinnedHTTPConnection(HTTPConnection):
+    """HTTP connection that connects to a pre-resolved IP instead of
+    re-resolving the hostname (the request itself must not trigger a
+    second DNS lookup — that lookup is the rebinding window)."""
+
+    def __init__(self, host: str, pinned_ip: str, **kw):
+        super().__init__(host, **kw)
+        self._pinned_ip = pinned_ip
+
+    def _new_conn(self):
+        return create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+            socket_options=self.socket_options,
+        )
+
+
+class _PinnedHTTPSConnection(HTTPSConnection):
+    """HTTPS variant. The TCP connection goes to the pinned IP while
+    ``host`` stays the original hostname, so the Host header, SNI and
+    TLS certificate verification all keep using the real name."""
+
+    def __init__(self, host: str, pinned_ip: str, **kw):
+        super().__init__(host, **kw)
+        self._pinned_ip = pinned_ip
+
+    def _new_conn(self):
+        return create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+            socket_options=self.socket_options,
+        )
+
+
+class _PinnedHTTPConnectionPool(HTTPConnectionPool):
+    """HTTP pool whose connections go to the pinned IP."""
+
+    def __init__(self, host: str, port: int | None = None, *, pinned_ip: str | None = None, **kw):
+        super().__init__(host, port, **kw)
+        if pinned_ip is None:
+            raise ValueError("pinned_ip is required for _PinnedHTTPConnectionPool")
+        # urllib3 calls ConnectionCls(host, port, **kw); a partial bound to
+        # the pinned IP is call-compatible even though it is not a class.
+        self.ConnectionCls = partial(_PinnedHTTPConnection, pinned_ip=pinned_ip)  # type: ignore[assignment]
+
+
+class _PinnedHTTPSConnectionPool(HTTPSConnectionPool):
+    """HTTPS pool whose TCP connections go to the pinned IP while SNI /
+    TLS verification keep using the original hostname."""
+
+    def __init__(self, host: str, port: int | None = None, *, pinned_ip: str | None = None, **kw):
+        super().__init__(host, port, **kw)
+        if pinned_ip is None:
+            raise ValueError("pinned_ip is required for _PinnedHTTPSConnectionPool")
+        self.ConnectionCls = partial(_PinnedHTTPSConnection, pinned_ip=pinned_ip)  # type: ignore[assignment]
+
+
+class _PinnedPoolManager(PoolManager):
+    """PoolManager that routes every scheme through pinned pools."""
+
+    def __init__(self, pinned_ip: str, **kw):
+        super().__init__(**kw)
+        # pool_classes_by_scheme is typed as dict[str, type]; partial is
+        # call-compatible with pool_cls(host, port, **request_context).
+        self.pool_classes_by_scheme["http"] = partial(  # type: ignore[assignment]
+            _PinnedHTTPConnectionPool, pinned_ip=pinned_ip
+        )
+        self.pool_classes_by_scheme["https"] = partial(  # type: ignore[assignment]
+            _PinnedHTTPSConnectionPool, pinned_ip=pinned_ip
+        )
+
+
+class _PinnedIPAdapter(requests.adapters.HTTPAdapter):
+    """Adapter that pins every connection to one pre-validated IP."""
+
+    def __init__(self, pinned_ip: str, *args, **kwargs):
+        # Must be set BEFORE super().__init__(): HTTPAdapter.__init__ calls
+        # self.init_poolmanager(), which reads self._pinned_ip.
+        self._pinned_ip = pinned_ip
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        self.poolmanager = _PinnedPoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            pinned_ip=self._pinned_ip,
+            **pool_kwargs,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -108,24 +211,36 @@ def load_image(
             )
         img_bytes = base64.b64decode(image_base64)
     elif image_url:
-        if is_private_url(image_url):
-            raise ValueError("image_url must not point to internal/private addresses")
-        logger.info("Fetching image from URL: %s", image_url[:120])
-        resp = requests.get(image_url, timeout=10, allow_redirects=False, stream=True)
-        resp.raise_for_status()
-        # Stream to enforce MAX_IMAGE_SIZE during download, not after
-        chunks: list[bytes] = []
-        total = 0
-        for chunk in resp.iter_content(chunk_size=8192):
-            total += len(chunk)
-            if total > MAX_IMAGE_SIZE:
-                resp.close()
-                raise ValueError(
-                    f"Image size exceeds limit of {MAX_IMAGE_SIZE} bytes "
-                    f"(received {total}+ bytes)"
-                )
-            chunks.append(chunk)
-        img_bytes = b"".join(chunks)
+        # Resolve ONCE and pin the connection to that IP — validation and
+        # the actual request share the same DNS answer, so the URL cannot
+        # be rebound to a private address between the check and the fetch.
+        _hostname, _port, pinned_ip = resolve_image_host(image_url)
+        logger.info(
+            "Fetching image from URL: %s (pinned to %s)", image_url[:120], pinned_ip
+        )
+        session = requests.Session()
+        session.mount("http://", _PinnedIPAdapter(pinned_ip))
+        session.mount("https://", _PinnedIPAdapter(pinned_ip))
+        try:
+            resp = session.get(
+                image_url, timeout=10, allow_redirects=False, stream=True
+            )
+            resp.raise_for_status()
+            # Stream to enforce MAX_IMAGE_SIZE during download, not after
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in resp.iter_content(chunk_size=8192):
+                total += len(chunk)
+                if total > MAX_IMAGE_SIZE:
+                    resp.close()
+                    raise ValueError(
+                        f"Image size exceeds limit of {MAX_IMAGE_SIZE} bytes "
+                        f"(received {total}+ bytes)"
+                    )
+                chunks.append(chunk)
+            img_bytes = b"".join(chunks)
+        finally:
+            session.close()
     else:
         raise ValueError("Must provide one of image_path, image_base64, or image_url")
 
