@@ -20,6 +20,18 @@ AI 模型面临一个尴尬的问题：有视觉能力的模型能认出"图里�
 
 QR Reader MCP Server 把 zbar 二维码解码能力**嵌入** AI 工作流——只要有图片输入，就能读出码里的内容。视觉模型可主动触发，纯文本模型通过用户引导触发。
 
+### 工作流
+
+```
+图片 → decode_qrcode_full → SUCCESS? → 直接用
+                ↓
+           RETRYABLE? → auto_enhance → 自动恢复
+                ↓
+           需精确控制? → enhance_and_decode
+```
+
+三个工具各司其职——`decode_qrcode_full` 先行诊断，`auto_enhance` 一键自动恢复，`enhance_and_decode` 精确手动控制。
+
 ### 三个工具
 
 | 工具 | 说明 |
@@ -45,8 +57,8 @@ sudo apt install libzbar0
 # macOS
 brew install zbar
 
-# Windows (vcpkg)
-vcpkg install zbar
+# Windows (choco — CI verified)
+choco install zbar
 ```
 
 ### 安装运行

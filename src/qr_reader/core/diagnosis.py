@@ -35,13 +35,13 @@ THRESHOLDS = {
 SCORE_GOOD = 0.18   # below this = all individual metrics are healthy
 SCORE_MODERATE = 0.35  # below this = some issues, retryable
 
-# Normalization anchors (the "perfect" end of each metric's scale)
-CONTRAST_PERFECT = 0.50   # std/128 at which contrast is "great"
-MODULATION_PERFECT = 0.70  # ISO modulation at which code area contrast is "great"
-GLARE_MAX = 0.30   # glare_ratio above this = 100% penalty
-NOISE_MAX = 50.0   # noise_level above this = 100% penalty
-ANGLE_MAX = 30.0   # right-angle deviation at which distortion penalty maxes out
-LEG_RATIO_MIN = 0.60  # leg_ratio below which distortion penalty maxes out
+# Normalization anchors (tuneable via env; the "perfect" end of each metric's scale)
+CONTRAST_PERFECT = float(os.getenv("QR_CONTRAST_PERFECT", "0.50"))
+MODULATION_PERFECT = float(os.getenv("QR_MODULATION_PERFECT", "0.70"))
+GLARE_MAX = float(os.getenv("QR_GLARE_MAX", "0.30"))
+NOISE_MAX = float(os.getenv("QR_NOISE_MAX", "50.0"))
+ANGLE_MAX = float(os.getenv("QR_ANGLE_MAX", "30.0"))
+LEG_RATIO_MIN = float(os.getenv("QR_LEG_RATIO_MIN", "0.60"))
 
 
 # ---------------------------------------------------------------------------
