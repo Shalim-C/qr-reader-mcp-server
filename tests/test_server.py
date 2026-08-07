@@ -10,7 +10,6 @@ import json
 import os
 import tempfile
 
-import cv2
 import numpy as np
 import pytest
 import requests
@@ -53,6 +52,10 @@ def sample_qr_image():
     """Generate a synthetic image with a simple QR-like pattern.
 
     Not a valid QR, but enough to test the decoding pipeline works."""
+    try:
+        import cv2
+    except ImportError:
+        pytest.skip("requires opencv-python")
     import qrcode
     qr = qrcode.QRCode(version=1, box_size=10, border=2)
     qr.add_data("https://example.com/test")
@@ -115,11 +118,11 @@ class TestLoadImage:
     def test_auto_resize_large_image(self, monkeypatch):
         """Image exceeding MAX_INPUT_PIXELS on longest edge gets downscaled."""
         monkeypatch.setattr("qr_reader.server.MAX_INPUT_PIXELS", 20)
-        img = np.zeros((50, 30, 3), dtype=np.uint8)
-        # wrap via base64
-        pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        # Use Pillow (no cv2 needed — works in light mode too)
+        from PIL import Image as PILImage
+        img = PILImage.new("RGB", (50, 30), color="black")
         buf = io.BytesIO()
-        pil.save(buf, format="PNG")
+        img.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
         result, _ = load_image(image_base64=b64)
         h, w = result.shape[:2]

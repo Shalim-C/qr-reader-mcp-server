@@ -81,7 +81,10 @@ def load_image_bytes(
     else:
         _ensure_pillow()
         from io import BytesIO
-        img = _PIL_IMAGE.open(BytesIO(img_bytes)).convert("RGB")
+        try:
+            img = _PIL_IMAGE.open(BytesIO(img_bytes)).convert("RGB")
+        except Exception:
+            raise ValueError("Failed to decode image — unsupported format or corrupt data")
         orig_w, orig_h = img.size
         w, h = orig_w, orig_h
         longer = max(w, h)

@@ -1,8 +1,10 @@
 """Tests for quality module — pure numpy/cv2, no external dependencies."""
 
-import cv2
 import numpy as np
 import pytest
+
+pytest.importorskip("cv2", reason="requires opencv-python")
+import cv2  # noqa: E402
 
 from qr_reader.core.quality import (
     analyze_image_quality,

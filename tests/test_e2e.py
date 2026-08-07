@@ -8,9 +8,11 @@ These tests validate the actual decoding pipeline end-to-end,
 catching regressions that mock-based unit tests can't.
 """
 
-import cv2
 import numpy as np
 import pytest
+
+pytest.importorskip("cv2", reason="requires opencv-python")
+import cv2  # noqa: E402
 
 from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region
 from qr_reader.core.diagnosis import classify_result
@@ -241,11 +243,9 @@ class TestDiagnosisE2E:
         img = cv2.cvtColor(np.array(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
         results = decode_qr_from_image(img)
         # Empty-content QR is structurally valid — pyzbar should decode it.
-        # If not, at minimum verify the call doesn't crash.
-        assert isinstance(results, list)
-        if results:
-            info = classify_result(img, True, len(results) > 0, results)
-            assert info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING")
+        assert len(results) >= 1, "pyzbar failed to decode a valid empty-content QR"
+        info = classify_result(img, True, len(results) > 0, results)
+        assert info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING")
 
 
 # ═══════════════════════════════════════════════════════════════════════
