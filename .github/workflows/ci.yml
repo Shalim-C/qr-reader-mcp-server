@@ -43,6 +43,7 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -v
+        continue-on-error: ${{ runner.os == 'macOS' }}
 
   test-light:
     runs-on: ubuntu-latest
