@@ -41,7 +41,8 @@ def _ensure_pillow():
     global _PIL_IMAGE, _PIL_IMAGE_ENHANCE, _PIL_IMAGE_FILTER
     if _PIL_IMAGE is None:
         from PIL import Image as _Img
-        from PIL import ImageEnhance as _Enh, ImageFilter as _Flt
+        from PIL import ImageEnhance as _Enh
+        from PIL import ImageFilter as _Flt
         _PIL_IMAGE = _Img
         _PIL_IMAGE_ENHANCE = _Enh
         _PIL_IMAGE_FILTER = _Flt
@@ -198,7 +199,7 @@ def image_modulation(arr: np.ndarray, bbox: list[int]) -> float | None:
         return None
     roi = g[y:y + h, x:x + w]
     # Otsu threshold to separate dark/light modules
-    thresh, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     dark = roi[binary == 0]
     light = roi[binary == 255]
     if len(dark) < 10 or len(light) < 10:
@@ -287,7 +288,8 @@ def op_sharpen(arr: np.ndarray, strength: float) -> np.ndarray:
 
     # Pillow fallback
     _ensure_pillow()
-    from PIL import Image as _Img, ImageEnhance
+    from PIL import Image as _Img
+    from PIL import ImageEnhance
     pil = _Img.fromarray(arr) if arr.ndim == 3 else _Img.fromarray(arr, mode="L")
     return np.array(ImageEnhance.Sharpness(pil).enhance(strength))
 
@@ -362,7 +364,7 @@ def qr_decode_opencv(arr: np.ndarray) -> list[dict]:
                 "raw_bytes": content.encode("utf-8").hex(),
             })
     except Exception:
-        pass
+        logger.debug("Failed to decode a single OpenCV result", exc_info=True)
     return results
 
 

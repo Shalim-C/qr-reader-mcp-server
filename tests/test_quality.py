@@ -3,13 +3,13 @@
 import cv2
 import numpy as np
 import pytest
+
 from qr_reader.core.quality import (
     analyze_image_quality,
-    is_too_blur,
-    is_low_contrast,
     has_glare,
+    is_low_contrast,
+    is_too_blur,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

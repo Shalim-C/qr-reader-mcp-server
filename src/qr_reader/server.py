@@ -1,15 +1,15 @@
 """QR Reader MCP Server — main entry point.
 
-Provides two tools for AI agents:
+Provides three tools for AI agents:
   decode_qrcode_full  — full-image decode with quality diagnostics
   enhance_and_decode  — region-based enhancement pipeline + decode
+  auto_enhance       — automatic multi-strategy enhancement
 
-In light mode (no opencv-python), all functionality is preserved —
+In light mode (no opencv-python), core functionality is preserved —
 enhance operations fall back to Pillow, quality metrics use pure numpy.
 """
 
 import base64
-import io
 import json
 import logging
 import os
@@ -18,22 +18,28 @@ import numpy as np
 import requests
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
-from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region, clamp_bbox, validate_bbox, detect_qr_regions
+from qr_reader.core.decoder import (
+    clamp_bbox,
+    decode_qr_from_image,
+    decode_qr_from_region,
+    detect_qr_regions,
+    validate_bbox,
+)
 from qr_reader.core.diagnosis import classify_result
-from qr_reader.core.quality import analyze_image_quality
-from qr_reader.core.url_utils import is_private_url
+from qr_reader.core.distortion import analyze_distortion
 from qr_reader.core.ops import (
-    load_image_bytes,
-    image_to_bytes,
     image_modulation,
-    op_upscale,
-    op_sharpen,
+    image_to_bytes,
+    is_cv2_available,
+    load_image_bytes,
     op_contrast,
     op_denoise,
-    is_cv2_available,
+    op_sharpen,
+    op_upscale,
 )
+from qr_reader.core.url_utils import is_private_url
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -85,6 +91,13 @@ def load_image(
         with open(image_path, "rb") as f:
             img_bytes = f.read()
     elif image_base64:
+        # B-14: pre-check estimated size before decoding
+        est_size = (len(image_base64) * 3) // 4
+        if est_size > MAX_IMAGE_SIZE:
+            raise ValueError(
+                f"Estimated image size {est_size} bytes exceeds limit "
+                f"of {MAX_IMAGE_SIZE} bytes — image may be too large"
+            )
         img_bytes = base64.b64decode(image_base64)
     elif image_url:
         if is_private_url(image_url):
@@ -196,7 +209,8 @@ TOOL_SCHEMAS = [
     Tool(
         name="decode_qrcode_full",
         description=(
-            "Scan the entire image for QR codes and decode them. Returns all detected codes with detailed diagnostics."
+            "Scan the entire image for QR codes and decode them. "
+            "Returns all detected codes with detailed diagnostics. "
             "Agent should decide next step based on result_code:"
             "SUCCESS → use content; SUCCESS_WITH_WARNING → check warnings;"
             "RETRYABLE → call enhance_and_decode;"
@@ -222,7 +236,8 @@ TOOL_SCHEMAS = [
                 "image_url": {
                     "type": "string",
                     "description": (
-                        "Public image URL. Use when the image is at a remote location accessible by the server."
+                        "Public image URL. "
+                        "Use when the image is at a remote location accessible by the server."
                     ),
                 },
             },
@@ -245,7 +260,10 @@ TOOL_SCHEMAS = [
                 },
                 "image_base64": {
                     "type": "string",
-                    "description": "Base64-encoded image — use when the image is in memory. Large images are auto-resized.",
+                    "description": (
+                        "Base64-encoded image — use when the image is in memory. "
+                        "Large images are auto-resized."
+                    ),
                 },
                 "image_url": {
                     "type": "string",
@@ -361,18 +379,27 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
                 image_base64=arguments.get("image_base64"),
                 image_url=arguments.get("image_url"),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return _error("IMAGE_LOAD_FAILED", str(exc))
 
         results = decode_qr_from_image(img)
         qr_detected = detect_qr_regions(img)
-        info = classify_result(img, qr_detected, len(results) > 0, results)
 
-        # ISO 15415 modulation — computed within the QR bbox when available
+        # Distortion + modulation (cv2-only metrics, synchronous with bbox)
+        distortion_info: dict | None = None
+        modulation_val: float | None = None
         if is_cv2_available() and results and len(results[0].get("bbox", [])) == 4:
-            mod = image_modulation(img, results[0]["bbox"])
-            if mod is not None and "analysis" in info:
-                info["analysis"]["modulation"] = round(mod, 4)
+            bbox = results[0]["bbox"]
+            modulation_val = image_modulation(img, bbox)
+            if modulation_val is not None:
+                modulation_val = round(modulation_val, 4)
+            distortion_info = analyze_distortion(img, bbox)
+
+        info = classify_result(
+            img, qr_detected, len(results) > 0, results,
+            distortion_info=distortion_info,
+            modulation=modulation_val,
+        )
 
         response = {
             "success": info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING"),
@@ -380,9 +407,11 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
             **resize_info,
         }
         quality = info.get("analysis", {}).get("quality", {})
+        qscore = info.get("analysis", {}).get("quality_score", -1)
         logger.info(
-            "decode_qrcode_full → %s (detected=%d) quality: blur=%.1f contrast=%.2f glare=%.2f",
+            "decode_qrcode_full → %s (score=%.2f detected=%d) blur=%.1f contr=%.2f glare=%.2f",
             info["result_code"],
+            qscore,
             len(results),
             quality.get("blur_score", -1),
             quality.get("contrast", -1),
@@ -401,7 +430,7 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
                 image_base64=arguments.get("image_base64"),
                 image_url=arguments.get("image_url"),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return _error("IMAGE_LOAD_FAILED", str(exc))
 
         bbox_raw = arguments.get("bbox")
@@ -465,7 +494,7 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
                 image_base64=arguments.get("image_base64"),
                 image_url=arguments.get("image_url"),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return _error("IMAGE_LOAD_FAILED", str(exc))
 
         bbox_raw = arguments.get("bbox")
@@ -567,7 +596,7 @@ def _error(code: str, message: str) -> list[TextContent]:
 def _check_prerequisites() -> None:
     """Warn if critical dependencies are missing."""
     try:
-        from pyzbar import pyzbar  # noqa: F811
+        from pyzbar import pyzbar  # noqa: F401 — availability check
     except ImportError:
         logger.warning(
             "pyzbar not found — install system zbar library: "

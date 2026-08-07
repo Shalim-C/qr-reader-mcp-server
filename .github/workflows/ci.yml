@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
@@ -31,6 +31,10 @@ jobs:
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
         run: choco install zbar --no-progress -y
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install zbar
 
       - name: Install Python dependencies
         run: |

@@ -11,6 +11,7 @@ catching regressions that mock-based unit tests can't.
 import cv2
 import numpy as np
 import pytest
+
 from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region
 from qr_reader.core.diagnosis import classify_result
 from qr_reader.server import apply_operations
@@ -239,9 +240,45 @@ class TestDiagnosisE2E:
         pil = qr.make_image(fill_color="black", back_color="white")
         img = cv2.cvtColor(np.array(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
         results = decode_qr_from_image(img)
+        # Empty-content QR is structurally valid — pyzbar should decode it.
+        # If not, at minimum verify the call doesn't crash.
+        assert isinstance(results, list)
         if results:
             info = classify_result(img, True, len(results) > 0, results)
             assert info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Malformed / edge-case images (E-05)
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestMalformedImages:
+    def test_random_bytes_not_an_image(self):
+        """Random bytes should raise, not crash."""
+        from qr_reader.server import load_image_bytes
+        with pytest.raises(ValueError):
+            load_image_bytes(b"\x00\x01\x02\x03not-an-image", max_long_edge=2560)
+
+    def test_truncated_png(self):
+        """Truncated PNG header should raise ValueError."""
+        from qr_reader.server import load_image_bytes
+        # PNG magic + IHDR start, then truncated
+        truncated = (
+            b"\x89PNG\r\n\x1a\n"  # PNG magic
+            b"\x00\x00\x00\x0dIHDR"  # IHDR start, no data
+        )
+        with pytest.raises(ValueError):
+            load_image_bytes(truncated, max_long_edge=2560)
+
+    def test_1px_image_no_crash(self):
+        """1-pixel image (B-15 fix) should not crash Laplacian."""
+        img = np.zeros((1, 1, 3), dtype=np.uint8)
+        results = decode_qr_from_image(img)
+        info = classify_result(img, False, False, results)
+        # Should not raise; result_code is what it is
+        assert info["result_code"] in (
+            "NO_QR_FOUND", "RETRYABLE", "QR_UNRECOVERABLE",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════

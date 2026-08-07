@@ -6,7 +6,13 @@ works in both full and light installs.
 """
 
 import numpy as np
-from qr_reader.core.ops import laplacian_variance, image_contrast, glare_ratio, noise_level
+
+from qr_reader.core.ops import (
+    glare_ratio,
+    image_contrast,
+    laplacian_variance,
+    noise_level,
+)
 
 
 def analyze_image_quality(img: np.ndarray) -> dict:

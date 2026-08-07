@@ -13,16 +13,16 @@ import tempfile
 import cv2
 import numpy as np
 import pytest
+import requests
 from PIL import Image
 
 from qr_reader.server import (
-    _error,
     TOOL_SCHEMAS,
+    _error,
     apply_operations,
     img_to_base64,
     load_image,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -247,7 +247,8 @@ class TestCallToolDecodeQrcodeFull:
         """End-to-end: decode_qrcode_full on a real QR returns SUCCESS."""
         from qr_reader.server import call_tool
 
-        mocker.patch("qr_reader.server.load_image", return_value=(sample_qr_image, {"image_size": [50, 50], "resize_factor": 1.0}))
+        mocker.patch("qr_reader.server.load_image",
+                      return_value=(sample_qr_image, {"image_size": [50, 50], "resize_factor": 1.0}))
         result = await call_tool("decode_qrcode_full", {"image_path": "/fake/qr.png"})
         payload = json.loads(result[0].text)
 
@@ -282,7 +283,9 @@ class TestCallToolEnhanceAndDecode:
         from qr_reader.server import call_tool
 
         monkeypatch.setattr("qr_reader.server.READ_ONLY_MODE", True)
-        mocker.patch("qr_reader.server.load_image", return_value=(np.zeros((50, 50, 3), dtype=np.uint8), {"image_size": [50, 50], "resize_factor": 1.0}))
+        ri = {"image_size": [50, 50], "resize_factor": 1.0}
+        dummy = np.zeros((50, 50, 3), dtype=np.uint8)
+        mocker.patch("qr_reader.server.load_image", return_value=(dummy, ri))
         result = await call_tool("enhance_and_decode", {"bbox": [0, 0, 10, 10]})
         payload = json.loads(result[0].text)
         assert payload["error"]["code"] == "READ_ONLY_MODE"
@@ -291,7 +294,9 @@ class TestCallToolEnhanceAndDecode:
     async def test_invalid_bbox(self, mocker):
         from qr_reader.server import call_tool
 
-        mocker.patch("qr_reader.server.load_image", return_value=(np.zeros((50, 50, 3), dtype=np.uint8), {"image_size": [50, 50], "resize_factor": 1.0}))
+        ri = {"image_size": [50, 50], "resize_factor": 1.0}
+        dummy = np.zeros((50, 50, 3), dtype=np.uint8)
+        mocker.patch("qr_reader.server.load_image", return_value=(dummy, ri))
         result = await call_tool("enhance_and_decode", {"bbox": [0, 0]})
         payload = json.loads(result[0].text)
         assert payload["error"]["code"] == "INVALID_BBOX"
@@ -303,3 +308,48 @@ class TestCallToolEnhanceAndDecode:
         result = await call_tool("nonexistent_tool", {})
         payload = json.loads(result[0].text)
         assert payload["error"]["code"] == "UNKNOWN_TOOL"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# URL download path tests (E-06)
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestImageUrlDownload:
+    def test_url_redirect_blocked(self, mocker):
+        """is_private_url check + allow_redirects=False prevents redirects."""
+        from qr_reader.server import load_image
+
+        mocker.patch("qr_reader.server.is_private_url", return_value=False)
+        mock_resp = mocker.MagicMock()
+        mock_resp.status_code = 302
+        mock_resp.headers = {"Location": "https://malicious.internal/"}
+        # 302 page body is HTML, not an image → imdecode fails
+        mock_resp.iter_content.return_value = [b"<html>redirect</html>"]
+        mocker.patch("requests.get", return_value=mock_resp)
+
+        with pytest.raises(ValueError, match="Failed to decode image"):
+            load_image(image_url="https://short.link/qr.png")
+
+    def test_url_download_size_limit_streaming(self, mocker):
+        """Streaming download cuts off at MAX_IMAGE_SIZE."""
+        from qr_reader.server import load_image
+
+        mocker.patch("qr_reader.server.is_private_url", return_value=False)
+        mock_resp = mocker.MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.iter_content.return_value = [b"x" * 1048576] * 11
+        mocker.patch("requests.get", return_value=mock_resp)
+        mocker.patch("qr_reader.server.MAX_IMAGE_SIZE", 10485760)
+
+        with pytest.raises(ValueError, match="Image size exceeds limit"):
+            load_image(image_url="https://example.com/huge.png")
+
+    def test_url_timeout_handled(self, mocker):
+        """Request timeout raises cleanly."""
+        from qr_reader.server import load_image
+
+        mocker.patch("qr_reader.server.is_private_url", return_value=False)
+        mocker.patch("requests.get", side_effect=requests.Timeout)
+
+        with pytest.raises(requests.Timeout):
+            load_image(image_url="https://example.com/slow.png")

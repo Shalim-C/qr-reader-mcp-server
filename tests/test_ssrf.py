@@ -1,6 +1,7 @@
 """Tests for SSRF protection in url_utils.is_private_url."""
 
 import pytest
+
 from qr_reader.core.url_utils import is_private_url
 
 

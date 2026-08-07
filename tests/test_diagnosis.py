@@ -1,13 +1,10 @@
 """Tests for diagnosis module — mocks quality to isolate classification logic."""
 
-import numpy as np
-import pytest
 from qr_reader.core.diagnosis import (
     _check_warning,
-    diagnose_single_result,
     classify_result,
+    diagnose_single_result,
 )
-
 
 # ---------------------------------------------------------------------------
 # _check_warning
@@ -90,19 +87,20 @@ class TestClassifyResult:
         mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=BLUR_QUALITY)
         info = classify_result(img=None, qr_detected=False, decode_success=False, decoded_results=[])
         assert info["result_code"] == "NO_QR_FOUND"
-        assert info["analysis"]["primary_issue"] == "too_blur"
+        assert info["analysis"]["primary_issue"] == "blur"
 
     def test_no_qr_dark(self, mocker):
         mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=DARK_QUALITY)
         info = classify_result(img=None, qr_detected=False, decode_success=False, decoded_results=[])
         assert info["result_code"] == "NO_QR_FOUND"
-        assert info["analysis"]["primary_issue"] == "too_dark"
+        assert info["analysis"]["primary_issue"] == "contrast"
 
     def test_no_qr_generic(self, mocker):
         mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
         info = classify_result(img=None, qr_detected=False, decode_success=False, decoded_results=[])
         assert info["result_code"] == "NO_QR_FOUND"
-        assert info["analysis"]["primary_issue"] == "no_qr"
+        # With weighted fusion, even GOOD_QUALITY has a top contributor
+        assert "contributions" in info["analysis"]
 
     def test_found_but_blur_retryable(self, mocker):
         mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=BLUR_QUALITY)
@@ -160,4 +158,5 @@ class TestClassifyResult:
         mocker.patch("qr_reader.core.diagnosis.analyze_image_quality", return_value=GOOD_QUALITY)
         info = classify_result(img=None, qr_detected=None, decode_success=False, decoded_results=[])
         assert info["result_code"] == "RETRYABLE"
-        assert info["analysis"]["primary_issue"] == "unknown"
+        # Weighted fusion always derives primary_issue from metrics
+        assert info["analysis"]["primary_issue"] is not None

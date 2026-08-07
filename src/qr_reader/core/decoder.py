@@ -12,6 +12,7 @@ backend anyway.
 """
 
 import logging
+
 import numpy as np
 
 logger = logging.getLogger("qr-reader-mcp.decoder")
@@ -19,7 +20,7 @@ logger = logging.getLogger("qr-reader-mcp.decoder")
 # ── pyzbar availability check ──────────────────────────────────────────
 _PYZBAR_AVAILABLE = False
 try:
-    from pyzbar import pyzbar  # noqa: F401
+    from pyzbar import pyzbar
     _PYZBAR_AVAILABLE = True
 except ImportError:
     pass
@@ -118,7 +119,7 @@ def decode_qr_from_image(img: np.ndarray) -> list[dict]:
             return results
 
     # ── Fallback / secondary pass: OpenCV ──────────────────────────────
-    from qr_reader.core.ops import qr_decode_opencv, is_cv2_available
+    from qr_reader.core.ops import is_cv2_available, qr_decode_opencv
     opencv_results = qr_decode_opencv(img)
     if opencv_results:
         logger.info("QR decoded via OpenCV fallback (pyzbar=%s)", _PYZBAR_AVAILABLE)

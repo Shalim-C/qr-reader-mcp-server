@@ -6,18 +6,15 @@ Tests both backends independently:
   - Fallback path (pyzbar returns empty → OpenCV kicks in)
 """
 
-from collections import namedtuple
 import numpy as np
-import pytest
+
 from qr_reader.core.decoder import (
-    _PYZBAR_AVAILABLE as _REAL_PYZBAR,
     clamp_bbox,
     decode_qr_from_image,
     decode_qr_from_region,
     detect_qr_regions,
 )
 from qr_reader.core.ops import _points_to_bbox
-
 
 # ---------------------------------------------------------------------------
 # Fake decoded result — mimics pyzbar output format
