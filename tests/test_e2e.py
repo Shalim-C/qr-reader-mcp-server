@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 pytest.importorskip("cv2", reason="requires opencv-python")
-import cv2  # noqa: E402
+import cv2
 
 from qr_reader.core.decoder import decode_qr_from_image, decode_qr_from_region
 from qr_reader.core.diagnosis import classify_result

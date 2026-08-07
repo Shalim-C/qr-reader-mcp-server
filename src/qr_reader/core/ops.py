@@ -83,7 +83,7 @@ def load_image_bytes(
         from io import BytesIO
         try:
             img = _PIL_IMAGE.open(BytesIO(img_bytes)).convert("RGB")
-        except Exception:
+        except Exception:  # noqa: BLE001 — Pillow raises many types, all should become ValueError
             raise ValueError("Failed to decode image — unsupported format or corrupt data")
         orig_w, orig_h = img.size
         w, h = orig_w, orig_h
