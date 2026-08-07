@@ -240,6 +240,17 @@ TOOL_SCHEMAS = [
                         "Use when the image is at a remote location accessible by the server."
                     ),
                 },
+                "symbologies": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional whitelist of barcode types to decode. "
+                        "Supported: QRCODE, EAN13, EAN8, CODE128, CODE39, "
+                        "CODABAR, I25, UPC-A, UPC-E, PDF417, DataMatrix, Aztec. "
+                        "Default (empty or omitted) = all types. "
+                        "Use e.g. ['EAN13'] for receipts, ['QRCODE'] for URLs."
+                    ),
+                },
             },
         },
     ),
@@ -382,7 +393,7 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
         except Exception as exc:  # noqa: BLE001
             return _error("IMAGE_LOAD_FAILED", str(exc))
 
-        results = decode_qr_from_image(img)
+        results = decode_qr_from_image(img, symbologies=arguments.get("symbologies"))
         qr_detected = detect_qr_regions(img)
 
         # Distortion + modulation (cv2-only metrics, synchronous with bbox)

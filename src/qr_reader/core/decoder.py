@@ -30,12 +30,19 @@ except ImportError:
 # Backend helpers
 # ---------------------------------------------------------------------------
 
-def _decode_with_pyzbar(img: np.ndarray) -> list[dict]:
-    """Decode all barcode types pyzbar supports (QR, EAN, Code128,
-    DataMatrix, Aztec, PDF417, etc.)."""
+def _decode_with_pyzbar(img: np.ndarray, symbologies: list[str] | None = None) -> list[dict]:
+    """Decode barcode types from pyzbar.
+
+    Args:
+        img: Image array.
+        symbologies: Optional whitelist of barcode types to decode
+            (e.g. ["QRCODE", "EAN13"]). None or empty = all types.
+    """
     results: list[dict] = []
     decoded_objects = pyzbar.decode(img)
     for obj in decoded_objects:
+        if symbologies and obj.type not in symbologies:
+            continue
         content = obj.data.decode("utf-8", errors="replace")
         x, y, w, h = obj.rect
         results.append({
@@ -100,25 +107,34 @@ def clamp_bbox(bbox: list[int], img_shape: tuple) -> tuple[int, int, int, int]:
     return x, y, w, h
 
 
-def decode_qr_from_image(img: np.ndarray) -> list[dict]:
-    """Decode all QR codes found in a full image.
+def decode_qr_from_image(img: np.ndarray, symbologies: list[str] | None = None) -> list[dict]:
+    """Decode barcodes from a full image.
 
     Primary: pyzbar (best accuracy).
     Fallback: OpenCV QRCodeDetector (when cv2 is installed).
 
     When pyzbar returns no results but OpenCV detects finder patterns,
-    also tries OpenCV decode as a secondary pass.
+    also tries OpenCV decode as a secondary pass (QR-only fallback).
+
+    Args:
+        img: Image array.
+        symbologies: Optional whitelist (e.g. ["QRCODE", "EAN13"]).
+            None = all types. OpenCV fallback is always QR-only.
 
     Returns:
         List of dicts, each with keys: content, bbox, type, raw_bytes.
     """
     # ── Primary: pyzbar ────────────────────────────────────────────────
     if _PYZBAR_AVAILABLE:
-        results = _decode_with_pyzbar(img)
+        results = _decode_with_pyzbar(img, symbologies=symbologies)
         if results:
             return results
 
-    # ── Fallback / secondary pass: OpenCV ──────────────────────────────
+    # ── Fallback / secondary pass: OpenCV (QR only) ─────────────────────
+    # OpenCV only does QR — skip if user explicitly filtered to non-QR types
+    if symbologies and "QRCODE" not in symbologies:
+        return []
+
     from qr_reader.core.ops import is_cv2_available, qr_decode_opencv
     opencv_results = qr_decode_opencv(img)
     if opencv_results:
@@ -128,12 +144,15 @@ def decode_qr_from_image(img: np.ndarray) -> list[dict]:
     return opencv_results
 
 
-def decode_qr_from_region(img: np.ndarray, bbox: list[int]) -> list[dict]:
-    """Decode QR codes from a cropped region of the image.
+def decode_qr_from_region(
+    img: np.ndarray, bbox: list[int], symbologies: list[str] | None = None,
+) -> list[dict]:
+    """Decode barcodes from a cropped region of the image.
 
     Args:
         img: Full image array.
         bbox: [x, y, width, height] of the target region.
+        symbologies: Optional whitelist.
 
     Returns:
         Same format as decode_qr_from_image.
@@ -142,4 +161,4 @@ def decode_qr_from_region(img: np.ndarray, bbox: list[int]) -> list[dict]:
     if w <= 0 or h <= 0:
         return []
     roi = img[y:y + h, x:x + w]
-    return decode_qr_from_image(roi)
+    return decode_qr_from_image(roi, symbologies=symbologies)

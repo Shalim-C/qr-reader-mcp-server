@@ -224,3 +224,71 @@ class TestPointsToBbox:
 
     def test_empty_returns_zero_bbox(self):
         assert _points_to_bbox(np.array([])) == [0, 0, 0, 0]
+
+
+# ---------------------------------------------------------------------------
+# Symbology filtering
+# ---------------------------------------------------------------------------
+
+class TestSymbologyFilter:
+    @staticmethod
+    def _mock_obj(mocker, obj_type: str, data: bytes):
+        """Create a mock pyzbar object with iterable rect."""
+        from collections import namedtuple
+        Rect = namedtuple("Rect", ["left", "top", "width", "height"])
+        obj = mocker.MagicMock()
+        obj.type = obj_type
+        obj.data = data
+        obj.rect = Rect(0, 0, 100, 100)
+        return obj
+
+    def test_qrcode_only_filters_ean13(self, mocker, monkeypatch):
+        monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", True)
+        mocker.patch("qr_reader.core.decoder.pyzbar.decode", return_value=[
+            self._mock_obj(mocker, "QRCODE", b"qrcode"),
+            self._mock_obj(mocker, "EAN13", b"ean13"),
+        ])
+        results = decode_qr_from_image(np.zeros((100, 100, 3)), symbologies=["QRCODE"])
+        assert len(results) == 1
+        assert results[0]["type"] == "QRCODE"
+
+    def test_ean13_only_filters_qrcode(self, mocker, monkeypatch):
+        monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", True)
+        mocker.patch("qr_reader.core.decoder.pyzbar.decode", return_value=[
+            self._mock_obj(mocker, "QRCODE", b"qr"),
+            self._mock_obj(mocker, "EAN13", b"ean"),
+        ])
+        results = decode_qr_from_image(np.zeros((100, 100, 3)), symbologies=["EAN13"])
+        assert len(results) == 1
+        assert results[0]["type"] == "EAN13"
+
+    def test_none_symbologies_returns_all(self, mocker, monkeypatch):
+        monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", True)
+        mocker.patch("qr_reader.core.decoder.pyzbar.decode", return_value=[
+            self._mock_obj(mocker, "QRCODE", b"qr"),
+            self._mock_obj(mocker, "EAN13", b"ean"),
+        ])
+        results = decode_qr_from_image(np.zeros((100, 100, 3)))
+        assert len(results) == 2
+
+    def test_multiple_symbologies(self, mocker, monkeypatch):
+        monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", True)
+        mocker.patch("qr_reader.core.decoder.pyzbar.decode", return_value=[
+            self._mock_obj(mocker, "QRCODE", b"qr"),
+            self._mock_obj(mocker, "EAN13", b"ean"),
+            self._mock_obj(mocker, "CODE128", b"code128"),
+        ])
+        results = decode_qr_from_image(
+            np.zeros((100, 100, 3)), symbologies=["QRCODE", "CODE128"]
+        )
+        assert len(results) == 2
+        types = {r["type"] for r in results}
+        assert types == {"QRCODE", "CODE128"}
+
+    def test_empty_symbologies_parsed_as_all(self, mocker, monkeypatch):
+        monkeypatch.setattr("qr_reader.core.decoder._PYZBAR_AVAILABLE", True)
+        mocker.patch("qr_reader.core.decoder.pyzbar.decode", return_value=[
+            self._mock_obj(mocker, "QRCODE", b"qr"),
+        ])
+        results = decode_qr_from_image(np.zeros((100, 100, 3)), symbologies=[])
+        assert len(results) == 1
