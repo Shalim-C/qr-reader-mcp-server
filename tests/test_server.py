@@ -106,6 +106,25 @@ class TestLoadImage:
         with pytest.raises(ValueError, match="internal"):
             load_image(image_url="http://localhost/img.png")
 
+    def test_invalid_base64_friendly_error(self):
+        """非法 base64 给出明确错误，而非 binascii.Error 泄漏成 INTERNAL_ERROR。"""
+        from qr_reader.server import load_image
+
+        with pytest.raises(ValueError, match="Invalid base64"):
+            load_image(image_base64="!!!not-base64!!!")
+
+    def test_image_path_realpath_resolved(self, mocker):
+        """扩展名白名单必须按 realpath 后的真实目标校验（符号链接伪装）。"""
+        from qr_reader.server import load_image
+
+        real = mocker.patch(
+            "qr_reader.server.os.path.realpath",
+            return_value="C:/real/target.png",
+        )
+        with pytest.raises(ValueError, match="not found"):
+            load_image(image_path="link.png")
+        real.assert_called_once_with("link.png")
+
     def test_rejects_unsupported_extension(self, tmp_path):
         bad = tmp_path / "image.txt"
         bad.write_bytes(b"not an image")

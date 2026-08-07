@@ -10,22 +10,17 @@ enhance operations fall back to Pillow, quality metrics use pure numpy.
 """
 
 import base64
+import binascii
 import json
 import logging
 import os
 from collections.abc import Sequence
-from functools import partial
 
 import numpy as np
 import requests
-import requests.adapters
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ImageContent, TextContent, Tool
-from urllib3.connection import HTTPConnection, HTTPSConnection
-from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
-from urllib3.poolmanager import PoolManager
-from urllib3.util.connection import create_connection
 
 from qr_reader.core.decoder import (
     clamp_bbox,
@@ -46,6 +41,7 @@ from qr_reader.core.ops import (
     op_sharpen,
     op_upscale,
 )
+from qr_reader.core.pinned_adapter import _PinnedIPAdapter
 from qr_reader.core.url_utils import resolve_image_host
 
 # ---------------------------------------------------------------------------
@@ -74,103 +70,6 @@ app = Server("qr-reader-mcp-server")
 
 
 # ---------------------------------------------------------------------------
-# DNS-pinning HTTP transport (SSRF: close the resolve-twice TOCTOU window)
-# ---------------------------------------------------------------------------
-
-class _PinnedHTTPConnection(HTTPConnection):
-    """HTTP connection that connects to a pre-resolved IP instead of
-    re-resolving the hostname (the request itself must not trigger a
-    second DNS lookup — that lookup is the rebinding window)."""
-
-    def __init__(self, host: str, pinned_ip: str, **kw):
-        super().__init__(host, **kw)
-        self._pinned_ip = pinned_ip
-
-    def _new_conn(self):
-        return create_connection(
-            (self._pinned_ip, self.port),
-            self.timeout,
-            self.source_address,
-            socket_options=self.socket_options,
-        )
-
-
-class _PinnedHTTPSConnection(HTTPSConnection):
-    """HTTPS variant. The TCP connection goes to the pinned IP while
-    ``host`` stays the original hostname, so the Host header, SNI and
-    TLS certificate verification all keep using the real name."""
-
-    def __init__(self, host: str, pinned_ip: str, **kw):
-        super().__init__(host, **kw)
-        self._pinned_ip = pinned_ip
-
-    def _new_conn(self):
-        return create_connection(
-            (self._pinned_ip, self.port),
-            self.timeout,
-            self.source_address,
-            socket_options=self.socket_options,
-        )
-
-
-class _PinnedHTTPConnectionPool(HTTPConnectionPool):
-    """HTTP pool whose connections go to the pinned IP."""
-
-    def __init__(self, host: str, port: int | None = None, *, pinned_ip: str | None = None, **kw):
-        super().__init__(host, port, **kw)
-        if pinned_ip is None:
-            raise ValueError("pinned_ip is required for _PinnedHTTPConnectionPool")
-        # urllib3 calls ConnectionCls(host, port, **kw); a partial bound to
-        # the pinned IP is call-compatible even though it is not a class.
-        self.ConnectionCls = partial(_PinnedHTTPConnection, pinned_ip=pinned_ip)  # type: ignore[assignment]
-
-
-class _PinnedHTTPSConnectionPool(HTTPSConnectionPool):
-    """HTTPS pool whose TCP connections go to the pinned IP while SNI /
-    TLS verification keep using the original hostname."""
-
-    def __init__(self, host: str, port: int | None = None, *, pinned_ip: str | None = None, **kw):
-        super().__init__(host, port, **kw)
-        if pinned_ip is None:
-            raise ValueError("pinned_ip is required for _PinnedHTTPSConnectionPool")
-        self.ConnectionCls = partial(_PinnedHTTPSConnection, pinned_ip=pinned_ip)  # type: ignore[assignment]
-
-
-class _PinnedPoolManager(PoolManager):
-    """PoolManager that routes every scheme through pinned pools."""
-
-    def __init__(self, pinned_ip: str, **kw):
-        super().__init__(**kw)
-        # pool_classes_by_scheme is typed as dict[str, type]; partial is
-        # call-compatible with pool_cls(host, port, **request_context).
-        self.pool_classes_by_scheme["http"] = partial(  # type: ignore[assignment]
-            _PinnedHTTPConnectionPool, pinned_ip=pinned_ip
-        )
-        self.pool_classes_by_scheme["https"] = partial(  # type: ignore[assignment]
-            _PinnedHTTPSConnectionPool, pinned_ip=pinned_ip
-        )
-
-
-class _PinnedIPAdapter(requests.adapters.HTTPAdapter):
-    """Adapter that pins every connection to one pre-validated IP."""
-
-    def __init__(self, pinned_ip: str, *args, **kwargs):
-        # Must be set BEFORE super().__init__(): HTTPAdapter.__init__ calls
-        # self.init_poolmanager(), which reads self._pinned_ip.
-        self._pinned_ip = pinned_ip
-        super().__init__(*args, **kwargs)
-
-    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
-        self.poolmanager = _PinnedPoolManager(
-            num_pools=connections,
-            maxsize=maxsize,
-            block=block,
-            pinned_ip=self._pinned_ip,
-            **pool_kwargs,
-        )
-
-
-# ---------------------------------------------------------------------------
 # Image loading
 # ---------------------------------------------------------------------------
 
@@ -185,6 +84,9 @@ def load_image(
     Returns an RGB ndarray (normalized across backends).
     """
     if image_path:
+        # Resolve symlinks first — the extension whitelist must apply to
+        # the real target, not a disguised link name (e.g. evil.png -> secret).
+        image_path = os.path.realpath(image_path)
         ext = os.path.splitext(image_path)[1].lower()
         if ext not in _ALLOWED_IMAGE_EXT:
             raise ValueError(
@@ -209,7 +111,10 @@ def load_image(
                 f"Estimated image size {est_size} bytes exceeds limit "
                 f"of {MAX_IMAGE_SIZE} bytes — image may be too large"
             )
-        img_bytes = base64.b64decode(image_base64)
+        try:
+            img_bytes = base64.b64decode(image_base64, validate=False)
+        except (binascii.Error, ValueError) as e:
+            raise ValueError(f"Invalid base64 image data: {e}") from None
     elif image_url:
         # Resolve ONCE and pin the connection to that IP — validation and
         # the actual request share the same DNS answer, so the URL cannot
