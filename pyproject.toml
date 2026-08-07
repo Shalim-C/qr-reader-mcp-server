@@ -20,15 +20,12 @@ dependencies = [
     "Pillow>=10.0.0",
     "numpy>=1.26.0",
     "requests>=2.31.0",
+    "pyzbar>=0.1.9",
 ]
 
 [project.optional-dependencies]
-light = [
-    "pyzbar>=0.1.9",
-]
 full = [
     "opencv-python>=4.9.0",
-    "pyzbar>=0.1.9",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -36,7 +33,6 @@ dev = [
     "pytest-mock>=3.14.0",
     "qrcode[pil]>=7.4.0",
     "opencv-python>=4.9.0",
-    "pyzbar>=0.1.9",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
 ]
