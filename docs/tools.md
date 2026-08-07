@@ -146,6 +146,9 @@ analysis.primary_issue = "too_dark"（太暗）
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `applied_operations` | string[] | 实际执行的操作列表 |
+| `regions_processed` | int | 处理的区域数量 |
+
+响应中同时包含 `image_size` 和 `resize_factor`，可将 bbox 映射回原图。
 
 ### 错误返回
 
@@ -153,7 +156,51 @@ analysis.primary_issue = "too_dark"（太暗）
 {
   "error": {
     "code": "READ_ONLY_MODE",
-    "message": "enhance_and_decode 在只读模式下不可用"
+    "message": "auto_enhance 和 enhance_and_decode 在只读模式下不可用"
   }
 }
 ```
+
+---
+
+## `auto_enhance`
+
+### 用途
+
+一键自动恢复质量不佳的二维码。7 种增强策略有序尝试（upscale ×2, ×4, sharpen, contrast, denoise, upscale+sharpen, upscale+contrast），首次解码成功即返回。
+
+### AI 助手应在何时使用
+
+1. `decode_qrcode_full` 返回 `RETRYABLE` → **首选此工具**
+2. 无需手动指定 bbox 或 enhancement operations —— 一次调用完成
+3. 仅在需要精确控制增强策略时退回 `enhance_and_decode`
+
+### 输入 Schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "image_path": { "type": "string" },
+    "image_base64": { "type": "string" },
+    "image_url": { "type": "string" },
+    "bbox": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "description": "可选目标区域 [x, y, width, height]。不传则处理全图"
+    }
+  }
+}
+```
+
+所有参数均为可选（`bbox` 不传时处理全图）。
+
+### 输出字段
+
+与 `decode_qrcode_full` 相同，额外增加：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `applied_strategy` | string\|null | 成功的策略名称（如 `upscale_2x`），无增强即成功时为 `null` |
+| `strategies_tried` | int | 尝试的策略数量 |
+| `bbox_used` | [int,int,int,int]\|null | 实际使用的目标区域（指定 `bbox` 时返回） |

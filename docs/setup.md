@@ -25,7 +25,9 @@ choco install zbar
 ```bash
 git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
-pip install -e .
+pip install -e ".[full]"   # 推荐：包含 OpenCV + 全部增强
+# 或
+# pip install -e ".[light]"  # 轻量版：仅 pyzbar，auto_enhance 仍可用
 ```
 
 ### 方式二：从 PyPI 安装（后续）
@@ -104,8 +106,12 @@ pip install qr-reader-mcp-server
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `LOG_LEVEL` | `info` | `debug`、`info`、`warning`、`error` |
-| `READ_ONLY_MODE` | `false` | 设为 `true` 禁用 `enhance_and_decode` |
-| `MAX_IMAGE_SIZE` | `10485760` | 图片大小上限（字节） |
+| `READ_ONLY_MODE` | `false` | 设为 `true` 禁用 `auto_enhance` 和 `enhance_and_decode` |
+| `MAX_IMAGE_SIZE` | `10485760` | 图片大小上限（字节，默认 10 MB） |
+| `MAX_INPUT_PIXELS` | `2560` | 图片长边超过此值自动缩放 |
+| `QR_BLUR_THRESHOLD` | `50.0` | 模糊度阈值，越低越严格 |
+| `QR_CONTRAST_THRESHOLD` | `0.20` | 对比度阈值（std/128），越低越严格 |
+| `QR_GLARE_THRESHOLD` | `0.10` | 反光检测阈值（空间方差），越低越敏感 |
 
 ## 验证安装
 

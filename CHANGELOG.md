@@ -49,7 +49,7 @@ All notable changes to QR Reader MCP Server will be documented in this file.
 
 ### Initial release
 
-- **Two tools:** `decode_qrcode_full` (full-image decode with diagnostics) and `enhance_and_decode` (region-based enhancement pipeline).
+- **Three tools:** `decode_qrcode_full` (full-image decode with diagnostics) and `enhance_and_decode` (region-based enhancement pipeline).
 - **Five-tier result code system** — SUCCESS / SUCCESS_WITH_WARNING / RETRYABLE / NO_QR_FOUND / QR_UNRECOVERABLE — enabling AI agents to self-correct on failure.
 - **Image quality diagnostics** — blur score, contrast, glare ratio, noise level included in every response.
 - **Enhancement pipeline** — upscale, sharpen, contrast adjustment, denoising, composable in any order.

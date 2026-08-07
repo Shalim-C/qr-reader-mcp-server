@@ -40,7 +40,7 @@ set ZBAR_PATH=C:\path\to\vcpkg\installed\x64-windows\bin
 在只读模式下调用了 `enhance_and_decode`。解决方法：
 
 1. 设置 `READ_ONLY_MODE=false` 后重启
-2. 改用 `decode_qrcode_full`
+2. 改用 `decode_qrcode_full`（`auto_enhance` 和 `enhance_and_decode` 在只读模式下均不可用）
 
 ### 每张图都返回 "NO_QR_FOUND"
 
@@ -52,10 +52,11 @@ set ZBAR_PATH=C:\path\to\vcpkg\installed\x64-windows\bin
 
 ### "RETRYABLE" 循环——增强后仍然失败
 
-每次工具调用独立分类，不会自动进行状态迁移。如果多次增强无效，建议：
-1. 自行限制重试次数（建议不超过 3 次）
-2. 确认图片中确实存在二维码
-3. 尝试让用户重新拍摄（防抖、调整光线）
+每次工具调用独立分类，不会自动进行状态迁移。推荐做法：
+
+1. **首选 `auto_enhance`**：一次调用自动尝试 7 种增强策略，首次成功即返回
+2. 如果 `auto_enhance` 全部 7 策略均失败，建议用户重新拍摄（防抖、调整光线）
+3. `enhance_and_decode` 仅适合需要精确控制增强策略的场景
 
 ### 服务启动了但 MCP 客户端连不上
 

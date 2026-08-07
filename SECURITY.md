@@ -17,7 +17,7 @@
 ### 网络访问
 
 - `image_url` 支持 HTTP 和 HTTPS。服务不会发起任意网络请求——只请求你提供的 URL。
-- SSRF 防护：DNS 解析后逐 IP 校验（拦截私有/回环/保留地址），域名黑名单（云元数据端点等），禁止 HTTP 重定向。
+- SSRF 防护：scheme 白名单（http/https only）+ DNS 解析后逐 IP 校验（拦截私有/回环/保留地址）+ 域名黑名单（云元数据端点等）+ 禁止 HTTP 重定向。
 - `MAX_IMAGE_SIZE` 配合流式下载在下载阶段即拦截超大文件，防止内存耗尽。
 
 ### 攻击面
@@ -25,7 +25,7 @@
 | 风险 | 缓解措施 |
 |---|---|
 | 畸形图片导致崩溃 | Pillow/OpenCV 处理大多数情况；图片加载异常返回 IMAGE_LOAD_FAILED；其他未预期异常由全局兜底返回 INTERNAL_ERROR |
-| image_url SSRF | DNS 解析后全量 IP 校验 + 内网/回环/保留地址黑名单 + 域名黑名单（云元数据端点）+ 禁止 HTTP 重定向 |
+| image_url SSRF | scheme 白名单（http/https only）+ DNS 解析后全量 IP 校验 + 内网/回环/保留地址黑名单 + 域名黑名单 + 禁止 HTTP 重定向 |
 | Base64 炸弹（超大载荷） | `MAX_IMAGE_SIZE` 限制解码后图片大小 |
 | pyzbar 库崩溃 | 解码/诊断路径异常由全局 try/except 捕获，返回 INTERNAL_ERROR |
 | 内存耗尽 | `MAX_IMAGE_SIZE`（默认 10 MB）+ 流式下载逐块检查 + 单图处理 |
@@ -40,7 +40,7 @@
 
 设置 `READ_ONLY_MODE=true` 后，服务仅保留 `decode_qrcode_full` 工具。此模式下：
 - 不修改任何图片
-- `enhance_and_decode` 不可用
+- `auto_enhance` 和 `enhance_and_decode` 均不可用
 - AI 只能读取，不能变换
 
 ### 依赖安全

@@ -1,6 +1,6 @@
 # Agent 行为指南（写给 AI 模型看的）
 
-接入 QR Reader MCP Server 后，你会获得两个工具：`decode_qrcode_full` 和 `enhance_and_decode`。以下是你的行为准则。
+接入 QR Reader MCP Server 后，你会获得三个工具：`decode_qrcode_full` 和 `enhance_and_decode`。以下是你的行为准则。
 
 ## 触发时机
 
