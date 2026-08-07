@@ -2,6 +2,30 @@
 
 All notable changes to QR Reader MCP Server will be documented in this file.
 
+## [0.2.0] - 2026-08-08
+
+### Added
+- **Barcode symbology filter** — `decode_qrcode_full` / `enhance_and_decode` accept an optional `symbologies` whitelist (e.g. `["EAN13"]` for receipts, `["QRCODE"]` for URLs). Empty/omitted = all types.
+- **Enhanced-image return** — `auto_enhance` now returns the enhanced region as an `ImageContent` (PNG) alongside JSON diagnostics, so multimodal agents can visually verify the enhancement result.
+- **Quality-anchor env vars documented** — the six normalization anchors (`QR_CONTRAST_PERFECT`, `QR_MODULATION_PERFECT`, `QR_GLARE_MAX`, `QR_NOISE_MAX`, `QR_ANGLE_MAX`, `QR_LEG_RATIO_MIN`) are now real, documented configuration.
+- **E2E edge cases** — malformed-image and blank-image test coverage.
+
+### Fixed
+- **Blank / no-QR images no longer misclassified as RETRYABLE** — when OpenCV explicitly detects no QR-like regions (`qr_detected=False`), the result is `NO_QR_FOUND` regardless of image quality; quality issues are still surfaced in `suggestion` so an agent can choose to call `auto_enhance` manually. (Reverted an over-correction that sent agents on pointless enhancement attempts for images with no code.)
+- **OpenCV decode path** — BGR/RGB handling and fallback decode fixes.
+- **Dead configuration removed** — `QR_CONTRAST_THRESHOLD` / `QR_GLARE_THRESHOLD` were read but never used by the production path; removed from code and documentation.
+- **Docs drift** — README / setup docs / `.env.example` now list only variables that actually take effect.
+
+### Changed
+- `MAX_INPUT_PIXELS` default raised `2560` → `4096` (larger images allowed before auto-resize).
+- Type-checking hardened: mypy errors 20 → 0.
+
+### CI
+- **PyPI publishing via OIDC trusted publishing** (no long-lived tokens).
+- **Docker smoke test** — builds the image and performs a real MCP `initialize` handshake.
+- **Version-consistency check** — `pyproject.toml` and `src/qr_reader/__init__.py` must agree.
+- **Light-mode (cv2-free) CI runs the full test suite**; cv2-dependent tests skip gracefully via `importorskip`.
+
 ## [0.1.0] - 2026-08-07
 
 ### Added
@@ -25,4 +49,5 @@ All notable changes to QR Reader MCP Server will be documented in this file.
 - Pillow `contrast` fallback uses the same linear transform as cv2 (`np.clip(alpha*arr+beta)`) for consistent cross-backend behavior.
 - `pyzbar` is now a base dependency (was optional extra).
 
+[0.2.0]: https://github.com/Shalim-C/qr-reader-mcp-server/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Shalim-C/qr-reader-mcp-server/releases/tag/v0.1.0

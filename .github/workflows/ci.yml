@@ -60,12 +60,27 @@ jobs:
           "
 
       - name: Run mypy
+        id: mypy
         run: python -m mypy src/ --ignore-missing-imports
         continue-on-error: ${{ runner.os == 'macOS' }}
 
       - name: Run tests
+        id: tests
         run: python -m pytest tests/ -v
         continue-on-error: ${{ runner.os == 'macOS' }}
+
+      # macOS keeps continue-on-error (zbar env is flaky there), but a
+      # silent pass is unacceptable — surface any failure prominently in
+      # the job summary so it cannot slip through unnoticed.
+      - name: macOS gate — summarize soft failures
+        if: runner.os == 'macOS' && (steps.mypy.outcome == 'failure' || steps.tests.outcome == 'failure')
+        run: |
+          echo "## ⚠️ macOS gate: soft failures were allowed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "mypy: **${{ steps.mypy.outcome }}** · pytest: **${{ steps.tests.outcome }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "These steps use \`continue-on-error\` on macOS (zbar environment instability) and will **not** block merging." >> "$GITHUB_STEP_SUMMARY"
+          echo "Inspect the failing steps above before merging, and file an issue if the failure is reproducible." >> "$GITHUB_STEP_SUMMARY"
 
   test-light:
     runs-on: ubuntu-latest

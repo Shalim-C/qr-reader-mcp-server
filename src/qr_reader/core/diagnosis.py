@@ -27,8 +27,6 @@ from qr_reader.core.quality import (
 
 THRESHOLDS = {
     "blur": float(os.getenv("QR_BLUR_THRESHOLD", "50.0")),
-    "contrast": float(os.getenv("QR_CONTRAST_THRESHOLD", "0.20")),
-    "glare": float(os.getenv("QR_GLARE_THRESHOLD", "0.10")),
 }
 
 # Quality-score boundaries for result-code classification.
@@ -261,17 +259,15 @@ def classify_result(
 
     # -- No QR detected ----------------------------------------------------
     if qr_detected is False:
-        # QR not detected, but image quality is poor → might be degradation
-        # causing detection failure, not absence of QR code
-        if qscore >= SCORE_GOOD:
-            return {
-                "result_code": "RETRYABLE",
-                "analysis": analysis,
-                "suggestion": suggestion or (
-                    "No QR code detected, but image quality issues may be "
-                    "preventing detection. Try auto_enhance to recover."
-                ),
-            }
+        # OpenCV explicitly found no QR-like regions. A missing finder
+        # pattern means there is no QR code in the image — not a degraded
+        # one — so enhancement cannot recover anything. Treating poor
+        # quality as RETRYABLE here wastes an agent turn on images that
+        # contain no code (e.g. a blank or scenery photo).
+        #
+        # Quality issues are still surfaced in `suggestion` (blur/contrast/
+        # glare guidance), so an agent can decide to call auto_enhance
+        # manually when it suspects a code may be present.
         return {
             "result_code": "NO_QR_FOUND",
             "analysis": analysis,
@@ -319,7 +315,3 @@ def classify_result(
         "analysis": analysis,
         "suggestion": suggestion,
     }
-
-
-# Keep legacy helpers for external callers (quality.py tests, etc.)
-# They are thin wrappers that still work correctly with THRESHOLDS.

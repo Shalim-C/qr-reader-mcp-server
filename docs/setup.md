@@ -108,10 +108,14 @@ pip install qr-reader-mcp-server
 | `LOG_LEVEL` | `info` | `debug`、`info`、`warning`、`error` |
 | `READ_ONLY_MODE` | `false` | 设为 `true` 禁用 `auto_enhance` 和 `enhance_and_decode` |
 | `MAX_IMAGE_SIZE` | `10485760` | 图片大小上限（字节，默认 10 MB） |
-| `MAX_INPUT_PIXELS` | `2560` | 图片长边超过此值自动缩放 |
-| `QR_BLUR_THRESHOLD` | `50.0` | 模糊度阈值，越低越严格 |
-| `QR_CONTRAST_THRESHOLD` | `0.20` | 对比度阈值（std/128），越低越严格 |
-| `QR_GLARE_THRESHOLD` | `0.10` | 反光检测阈值（空间方差），越低越敏感 |
+| `MAX_INPUT_PIXELS` | `4096` | 图片长边超过此值自动缩放 |
+| `QR_BLUR_THRESHOLD` | `50.0` | Laplacian 方差归一化阈值（模糊贡献 = 阈值 ÷ 实际方差） |
+| `QR_CONTRAST_PERFECT` | `0.50` | 对比度归一化锚点（实际对比度越接近此值越健康） |
+| `QR_MODULATION_PERFECT` | `0.70` | ISO 15415 调制比归一化锚点 |
+| `QR_GLARE_MAX` | `0.30` | 反光归一化上界（超过视为严重反光） |
+| `QR_NOISE_MAX` | `50.0` | 噪声归一化上界 |
+| `QR_ANGLE_MAX` | `30.0` | 畸变角度归一化上界（度） |
+| `QR_LEG_RATIO_MIN` | `0.60` | 畸变腿比归一化下界 |
 
 ## 验证安装
 
