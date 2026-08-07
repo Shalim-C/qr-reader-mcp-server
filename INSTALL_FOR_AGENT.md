@@ -66,7 +66,7 @@ env     = { LOG_LEVEL = "info" }
 }
 ```
 
-**uvx (once published to PyPI):**
+**uvx:**
 
 ```shell
 uvx qr-reader-mcp-server
