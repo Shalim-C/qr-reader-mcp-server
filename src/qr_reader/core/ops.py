@@ -54,7 +54,7 @@ def _ensure_pillow():
 # ---------------------------------------------------------------------------
 
 def load_image_bytes(
-    img_bytes: bytes, max_long_edge: int = 2560
+    img_bytes: bytes, max_long_edge: int = 4096
 ) -> tuple[np.ndarray, dict]:
     """Load image bytes → (numpy array (H×W×C RGB), resize_info).
 
@@ -352,16 +352,22 @@ def qr_decode_opencv(arr: np.ndarray) -> list[dict]:
     if not _CV2_AVAILABLE:
         return []
     import cv2
-    gray = _to_gray(arr)
+    # arr is RGB from load_image_bytes, convert to BGR for OpenCV
+    if arr.ndim == 3 and arr.shape[2] == 3:
+        arr_bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    else:
+        arr_bgr = arr
+    gray = _to_gray(arr_bgr)
     detector = cv2.QRCodeDetector()
     results: list[dict] = []
     try:
         ret = detector.detectAndDecode(gray)
-        if isinstance(ret, tuple) and len(ret) >= 2 and ret[0]:
-            content = ret[1]
+        # detectAndDecode returns (content, points, straight_qrcode)
+        if isinstance(ret, tuple) and len(ret) >= 1 and ret[0]:
+            content = ret[0]  # ← ret[0] is the decoded string
             if not isinstance(content, str):
                 return results
-            pts = ret[2] if len(ret) > 2 else None
+            pts = ret[1] if len(ret) > 1 else None
             bbox = _points_to_bbox(pts) if pts is not None else [0, 0, 0, 0]
             results.append({
                 "content": content,

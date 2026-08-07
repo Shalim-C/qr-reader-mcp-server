@@ -49,7 +49,7 @@ from qr_reader.core.url_utils import is_private_url
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").lower()
 READ_ONLY_MODE = os.getenv("READ_ONLY_MODE", "false").lower() == "true"
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", "10485760"))  # 10 MB
-MAX_INPUT_PIXELS = int(os.getenv("MAX_INPUT_PIXELS", "2560"))  # auto-resize limit
+MAX_INPUT_PIXELS = int(os.getenv("MAX_INPUT_PIXELS", "4096"))  # auto-resize limit
 
 _ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff"}
 

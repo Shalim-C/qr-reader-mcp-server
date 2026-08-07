@@ -261,6 +261,17 @@ def classify_result(
 
     # -- No QR detected ----------------------------------------------------
     if qr_detected is False:
+        # QR not detected, but image quality is poor → might be degradation
+        # causing detection failure, not absence of QR code
+        if qscore >= SCORE_GOOD:
+            return {
+                "result_code": "RETRYABLE",
+                "analysis": analysis,
+                "suggestion": suggestion or (
+                    "No QR code detected, but image quality issues may be "
+                    "preventing detection. Try auto_enhance to recover."
+                ),
+            }
         return {
             "result_code": "NO_QR_FOUND",
             "analysis": analysis,
