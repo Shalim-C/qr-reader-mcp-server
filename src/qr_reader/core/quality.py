@@ -33,11 +33,11 @@ def is_too_blur(blur_score: float, threshold: float = 50.0) -> bool:
     return blur_score < threshold
 
 
-def is_low_contrast(contrast: float, threshold: float = 0.15) -> bool:
+def is_low_contrast(contrast: float, threshold: float = 0.20) -> bool:
     """Return True if contrast is below the threshold."""
     return contrast < threshold
 
 
-def has_glare(glare_ratio: float, threshold: float = 0.3) -> bool:
+def has_glare(glare_ratio: float, threshold: float = 0.10) -> bool:
     """Return True if the glare ratio exceeds the threshold."""
     return glare_ratio > threshold

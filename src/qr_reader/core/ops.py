@@ -51,10 +51,13 @@ def _ensure_pillow():
 # Image loading
 # ---------------------------------------------------------------------------
 
-def load_image_bytes(img_bytes: bytes, max_long_edge: int = 2560) -> np.ndarray:
-    """Load image bytes → numpy array (H×W×C RGB).
+def load_image_bytes(
+    img_bytes: bytes, max_long_edge: int = 2560
+) -> tuple[np.ndarray, dict]:
+    """Load image bytes → (numpy array (H×W×C RGB), resize_info).
 
     Auto-resizes if longer edge exceeds max_long_edge.
+    resize_info contains image_size, resize_factor, and original_size (if resized).
     Returns RGB regardless of backend (cv2 natively returns BGR).
     """
     if _CV2_AVAILABLE:
@@ -64,25 +67,36 @@ def load_image_bytes(img_bytes: bytes, max_long_edge: int = 2560) -> np.ndarray:
             raise ValueError("Failed to decode image — unsupported format or corrupt data")
         arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)  # normalize to RGB
         h, w = arr.shape[:2]
+        orig_w, orig_h = w, h
         longer = max(h, w)
         if longer > max_long_edge:
             scale = max_long_edge / longer
             new_w, new_h = int(w * scale), int(h * scale)
             arr = cv2.resize(arr, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            logger.info("Auto-resized %dx%d → %dx%d (limit=%dpx)", w, h, new_w, new_h, max_long_edge)
-        return arr
+            h, w = new_h, new_w
+            logger.info("Auto-resized %dx%d → %dx%d (limit=%dpx)", orig_h, orig_w, h, w, max_long_edge)
+        return arr, _resize_info(w, h, orig_w, orig_h)
     else:
         _ensure_pillow()
         from io import BytesIO
         img = _PIL_IMAGE.open(BytesIO(img_bytes)).convert("RGB")
-        w, h = img.size
+        orig_w, orig_h = img.size
+        w, h = orig_w, orig_h
         longer = max(w, h)
         if longer > max_long_edge:
             scale = max_long_edge / longer
             new_w, new_h = int(w * scale), int(h * scale)
             img = img.resize((new_w, new_h), _PIL_IMAGE.LANCZOS)
-            logger.info("Auto-resized %dx%d → %dx%d (limit=%dpx)", w, h, new_w, new_h, max_long_edge)
-        return np.array(img)
+            w, h = new_w, new_h
+            logger.info("Auto-resized %dx%d → %dx%d (limit=%dpx)", orig_w, orig_h, w, h, max_long_edge)
+        return np.array(img), _resize_info(w, h, orig_w, orig_h)
+
+def _resize_info(w: int, h: int, orig_w: int, orig_h: int) -> dict:
+    """Build resize metadata dict for Agent bbox mapping."""
+    info: dict = {"image_size": [h, w], "resize_factor": round(w / orig_w, 4)}
+    if orig_w != w or orig_h != h:
+        info["original_size"] = [orig_h, orig_w]
+    return info
 
 
 def image_to_bytes(arr: np.ndarray, fmt: str = "png", channel_order: str = "auto") -> bytes:
@@ -157,15 +171,73 @@ def laplacian_variance(arr: np.ndarray, gray: np.ndarray | None = None) -> float
 
 
 def image_contrast(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
-    """Compute contrast as (max − min) / 255."""
+    """Compute contrast as grayscale standard deviation / 128.
+
+    Robust to single-outlier influence (unlike max-min range).
+    0.0 = perfectly flat, ~0.4 = normal, 1.0 = extreme.
+    """
     g = gray if gray is not None else _to_gray(arr)
-    return float(g.max() - g.min()) / 255.0
+    return float(np.std(g)) / 128.0
+
+
+def image_modulation(arr: np.ndarray, bbox: list[int]) -> float | None:
+    """ISO 15415 Modulation — contrast within the QR symbol region.
+
+    Uses Otsu threshold to separate dark/light modules, then computes
+    (light_mean - dark_mean) / light_mean.  Returns None if the region
+    cannot be segmented (monochrome or too small).
+
+    Args:
+        arr: Full image (H×W×C or H×W).
+        bbox: [x, y, w, h] of the QR code region.
+    """
+    import cv2
+    g = _to_gray(arr)
+    x, y, w, h = bbox
+    if w < 5 or h < 5:
+        return None
+    roi = g[y:y + h, x:x + w]
+    # Otsu threshold to separate dark/light modules
+    thresh, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    dark = roi[binary == 0]
+    light = roi[binary == 255]
+    if len(dark) < 10 or len(light) < 10:
+        return None
+    dark_mean = float(np.mean(dark))
+    light_mean = float(np.mean(light))
+    if light_mean < 1.0:
+        return None
+    return float((light_mean - dark_mean) / light_mean)
 
 
 def glare_ratio(arr: np.ndarray, gray: np.ndarray | None = None) -> float:
-    """Fraction of pixels with value > 240."""
+    """Spatial concentration of overexposed pixels — glare indicator.
+
+    Divides image into a 4×4 grid and measures how unevenly bright pixels
+    are distributed. Uniform white backgrounds produce low values (~0.05);
+    localized glare spots produce higher values (≥0.10).
+    """
     g = gray if gray is not None else _to_gray(arr)
-    return float(np.sum(g > 240)) / g.size
+    bright = g > 240
+    overall = float(np.sum(bright)) / g.size
+
+    # Very dark or very bright image → not glare
+    if overall < 0.1 or overall > 0.9:
+        return 0.0
+
+    # Spatial distribution: compute bright ratio per grid cell
+    h, w = g.shape
+    gh, gw = max(1, h // 4), max(1, w // 4)
+    cell_ratios: list[float] = []
+    for i in range(4):
+        y0, y1 = i * gh, min((i + 1) * gh, h)
+        for j in range(4):
+            x0, x1 = j * gw, min((j + 1) * gw, w)
+            cell = bright[y0:y1, x0:x1]
+            cell_ratios.append(float(np.sum(cell)) / cell.size)
+
+    # High variance across cells = concentrated glare
+    return float(np.std(cell_ratios))
 
 
 def noise_level(arr: np.ndarray, gray: np.ndarray | None = None) -> float:

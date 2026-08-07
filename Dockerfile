@@ -10,6 +10,9 @@ COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .[full]
 
+RUN useradd --create-home --no-log-init qrreader
+USER qrreader
+
 ENV LOG_LEVEL=info
 ENV READ_ONLY_MODE=false
 ENV MAX_IMAGE_SIZE=10485760

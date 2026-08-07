@@ -67,12 +67,12 @@ def sample_qr_image():
 
 class TestLoadImage:
     def test_load_from_local_path(self, sample_png_path):
-        img = load_image(image_path=sample_png_path)
+        img, _ = load_image(image_path=sample_png_path)
         assert isinstance(img, np.ndarray)
         assert img.shape == (10, 10, 3)
 
     def test_load_from_base64(self, sample_png_base64):
-        img = load_image(image_base64=sample_png_base64)
+        img, _ = load_image(image_base64=sample_png_base64)
         assert img.shape == (10, 10, 3)
 
     def test_load_from_url(self, mocker):
@@ -85,7 +85,7 @@ class TestLoadImage:
         mock_resp.iter_content = lambda chunk_size: [data]
         mock_resp.raise_for_status = lambda: None
         mock_get.return_value = mock_resp
-        result = load_image(image_url="https://example.com/qr.png")
+        result, _ = load_image(image_url="https://example.com/qr.png")
         assert result.shape == (5, 5, 3)
 
     def test_rejects_private_url(self, mocker):
@@ -121,7 +121,7 @@ class TestLoadImage:
         buf = io.BytesIO()
         pil.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
-        result = load_image(image_base64=b64)
+        result, _ = load_image(image_base64=b64)
         h, w = result.shape[:2]
         assert max(h, w) <= 20
 
@@ -247,7 +247,7 @@ class TestCallToolDecodeQrcodeFull:
         """End-to-end: decode_qrcode_full on a real QR returns SUCCESS."""
         from qr_reader.server import call_tool
 
-        mocker.patch("qr_reader.server.load_image", return_value=sample_qr_image)
+        mocker.patch("qr_reader.server.load_image", return_value=(sample_qr_image, {"image_size": [50, 50], "resize_factor": 1.0}))
         result = await call_tool("decode_qrcode_full", {"image_path": "/fake/qr.png"})
         payload = json.loads(result[0].text)
 
@@ -282,7 +282,7 @@ class TestCallToolEnhanceAndDecode:
         from qr_reader.server import call_tool
 
         monkeypatch.setattr("qr_reader.server.READ_ONLY_MODE", True)
-        mocker.patch("qr_reader.server.load_image")
+        mocker.patch("qr_reader.server.load_image", return_value=(np.zeros((50, 50, 3), dtype=np.uint8), {"image_size": [50, 50], "resize_factor": 1.0}))
         result = await call_tool("enhance_and_decode", {"bbox": [0, 0, 10, 10]})
         payload = json.loads(result[0].text)
         assert payload["error"]["code"] == "READ_ONLY_MODE"
@@ -291,7 +291,7 @@ class TestCallToolEnhanceAndDecode:
     async def test_invalid_bbox(self, mocker):
         from qr_reader.server import call_tool
 
-        mocker.patch("qr_reader.server.load_image", return_value=np.zeros((50, 50, 3), dtype=np.uint8))
+        mocker.patch("qr_reader.server.load_image", return_value=(np.zeros((50, 50, 3), dtype=np.uint8), {"image_size": [50, 50], "resize_factor": 1.0}))
         result = await call_tool("enhance_and_decode", {"bbox": [0, 0]})
         payload = json.loads(result[0].text)
         assert payload["error"]["code"] == "INVALID_BBOX"

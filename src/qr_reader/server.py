@@ -27,6 +27,7 @@ from qr_reader.core.url_utils import is_private_url
 from qr_reader.core.ops import (
     load_image_bytes,
     image_to_bytes,
+    image_modulation,
     op_upscale,
     op_sharpen,
     op_contrast,
@@ -133,6 +134,23 @@ _ENHANCE_BOUNDS = {
     "denoise":         {"h":            (3, 30, 10)},
 }
 _MAX_OPERATIONS = 5
+
+# ── auto_enhance strategies (ordered: simpler first, combos last) ──────
+_AUTO_ENHANCE_STRATEGIES = [
+    ("upscale_2x",     [{"op": "upscale",         "params": {"scale": 2.0}}]),
+    ("upscale_4x",     [{"op": "upscale",         "params": {"scale": 4.0}}]),
+    ("sharpen",        [{"op": "sharpen",         "params": {"strength": 2.0}}]),
+    ("contrast",       [{"op": "adjust_contrast", "params": {"alpha": 1.5}}]),
+    ("denoise",        [{"op": "denoise",         "params": {"h": 10}}]),
+    ("upscale_sharpen",[
+        {"op": "upscale", "params": {"scale": 2.0}},
+        {"op": "sharpen", "params": {"strength": 1.5}},
+    ]),
+    ("upscale_contrast",[
+        {"op": "upscale",         "params": {"scale": 2.0}},
+        {"op": "adjust_contrast", "params": {"alpha": 1.5}},
+    ]),
+]
 
 def _validate_enhance_params(op: str, params: dict) -> dict:
     """Clamp enhancement parameters to safe ranges and return cleaned params.
@@ -268,6 +286,41 @@ TOOL_SCHEMAS = [
             "required": ["bbox"],
         },
     ),
+    Tool(
+        name="auto_enhance",
+        description=(
+            "Automatically try enhancement strategies to decode a QR code in one call."
+            "Tries up to 7 strategies (upscale, sharpen, contrast, denoise, combos) "
+            "in sequence — returns as soon as one succeeds."
+            "Ideal for RETRYABLE results from decode_qrcode_full:"
+            "no manual bbox estimation or operation selection needed."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "image_path": {
+                    "type": "string",
+                    "description": "Local image absolute path — preferred when available.",
+                },
+                "image_base64": {
+                    "type": "string",
+                    "description": "Base64-encoded image.",
+                },
+                "image_url": {
+                    "type": "string",
+                    "description": "Public image URL.",
+                },
+                "bbox": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": (
+                        "Optional target region [x, y, width, height]."
+                        "If omitted, processes the entire image."
+                    ),
+                },
+            },
+        },
+    ),
 ]
 
 
@@ -280,6 +333,7 @@ async def list_tools() -> list[Tool]:
     tools = [TOOL_SCHEMAS[0]]  # decode_qrcode_full is always available
     if not READ_ONLY_MODE:
         tools.append(TOOL_SCHEMAS[1])  # enhance_and_decode
+        tools.append(TOOL_SCHEMAS[2])  # auto_enhance
     logger.info(
         "Listing %d tools (read_only=%s, cv2=%s)",
         len(tools), READ_ONLY_MODE, is_cv2_available(),
@@ -302,7 +356,7 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
     # ── decode_qrcode_full ────────────────────────────────────────────────
     if name == "decode_qrcode_full":
         try:
-            img = load_image(
+            img, resize_info = load_image(
                 image_path=arguments.get("image_path"),
                 image_base64=arguments.get("image_base64"),
                 image_url=arguments.get("image_url"),
@@ -313,9 +367,17 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
         results = decode_qr_from_image(img)
         qr_detected = detect_qr_regions(img)
         info = classify_result(img, qr_detected, len(results) > 0, results)
+
+        # ISO 15415 modulation — computed within the QR bbox when available
+        if is_cv2_available() and results and len(results[0].get("bbox", [])) == 4:
+            mod = image_modulation(img, results[0]["bbox"])
+            if mod is not None and "analysis" in info:
+                info["analysis"]["modulation"] = round(mod, 4)
+
         response = {
             "success": info["result_code"] in ("SUCCESS", "SUCCESS_WITH_WARNING"),
             **info,
+            **resize_info,
         }
         quality = info.get("analysis", {}).get("quality", {})
         logger.info(
@@ -334,7 +396,7 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
             return _error("READ_ONLY_MODE", "enhance_and_decode is unavailable in read-only mode")
 
         try:
-            img = load_image(
+            img, resize_info = load_image(
                 image_path=arguments.get("image_path"),
                 image_base64=arguments.get("image_base64"),
                 image_url=arguments.get("image_url"),
@@ -383,12 +445,101 @@ async def _handle_tool(name: str, arguments: dict) -> list[TextContent]:
             "applied_operations": [s["op"] for s in operations],
             "regions_processed": len(all_results),
             "results": all_results,
+            **resize_info,
         }
         logger.info(
             "enhance_and_decode → %d regions (ops=%s)",
             len(all_results),
             response["applied_operations"],
         )
+        return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
+
+    # ── auto_enhance ─────────────────────────────────────────────────────
+    if name == "auto_enhance":
+        if READ_ONLY_MODE:
+            return _error("READ_ONLY_MODE", "auto_enhance is unavailable in read-only mode")
+
+        try:
+            img, resize_info = load_image(
+                image_path=arguments.get("image_path"),
+                image_base64=arguments.get("image_base64"),
+                image_url=arguments.get("image_url"),
+            )
+        except Exception as exc:
+            return _error("IMAGE_LOAD_FAILED", str(exc))
+
+        bbox_raw = arguments.get("bbox")
+        region_img: np.ndarray = img
+        bbox_used: list | None = None
+
+        if bbox_raw:
+            try:
+                validate_bbox(bbox_raw)
+            except ValueError as exc:
+                return _error("INVALID_BBOX", str(exc))
+            x, y, w, h = clamp_bbox(bbox_raw, img.shape)
+            region_img = img[y:y + h, x:x + w]
+            bbox_used = [x, y, w, h]
+
+        # -- Attempt 0: decode as-is ---------------------------------------
+        results = decode_qr_from_image(region_img)
+        if results:
+            qr_detected = detect_qr_regions(region_img)
+            info = classify_result(region_img, qr_detected, True, results)
+            response = {
+                "success": True,
+                "applied_strategy": None,
+                "strategies_tried": 0,
+                **info,
+                **resize_info,
+            }
+            logger.info("auto_enhance → success without enhancement")
+            return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
+
+        # -- Try each enhancement strategy sequentially --------------------
+        strategies_tried = 0
+        last_info: dict = {}
+
+        for strategy_name, operations in _AUTO_ENHANCE_STRATEGIES:
+            strategies_tried += 1
+            enhanced = apply_operations(region_img, operations)
+            results = decode_qr_from_image(enhanced)
+            if results:
+                qr_detected = detect_qr_regions(enhanced)
+                info = classify_result(enhanced, qr_detected, True, results)
+                response = {
+                    "success": True,
+                    "applied_strategy": strategy_name,
+                    "strategies_tried": strategies_tried,
+                    **info,
+                    **resize_info,
+                }
+                if bbox_used:
+                    response["bbox_used"] = bbox_used
+                logger.info("auto_enhance → success with %s (attempt %d)", strategy_name, strategies_tried)
+                return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
+
+            # Keep the best diagnostic for the final report
+            qr_detected = detect_qr_regions(enhanced)
+            info = classify_result(enhanced, qr_detected, len(results) > 0, results)
+            if not last_info or info["result_code"] not in ("RETRYABLE", "NO_QR_FOUND"):
+                last_info = info
+
+        # -- All strategies failed -----------------------------------------
+        response = {
+            "success": False,
+            "applied_strategy": None,
+            "strategies_tried": strategies_tried,
+            **last_info,
+            **resize_info,
+            "suggestion": (
+                "All 7 enhancement strategies failed to decode a QR code."
+                "The image may contain no QR code, or the QR code is too damaged."
+            ),
+        }
+        if bbox_used:
+            response["bbox_used"] = bbox_used
+        logger.info("auto_enhance → all %d strategies failed", strategies_tried)
         return [TextContent(type="text", text=json.dumps(response, ensure_ascii=False, indent=2))]
 
     return _error("UNKNOWN_TOOL", f"Unknown tool: {name}")

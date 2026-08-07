@@ -4,6 +4,13 @@ All notable changes to QR Reader MCP Server will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`auto_enhance` tool** — automatically tries 7 enhancement strategies (upscale, sharpen, contrast, denoise, combos) in sequence and returns as soon as one succeeds. No manual bbox estimation or operation selection needed.
+- **Resize metadata** — every response now includes `image_size`, `resize_factor`, and (when auto-resized) `original_size`, so Agents can map bbox coordinates back to the original image.
+
+### Security
+- **Docker runs as non-root** — `USER qrreader` added to Dockerfile.
+
 ### Security (fixed)
 - **SSRF protection hardened** ...
 - **Streaming download** ...

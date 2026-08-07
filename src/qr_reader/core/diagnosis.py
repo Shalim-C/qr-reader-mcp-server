@@ -20,8 +20,8 @@ from qr_reader.core.quality import (
 
 THRESHOLDS = {
     "blur": float(os.getenv("QR_BLUR_THRESHOLD", "50.0")),
-    "contrast": float(os.getenv("QR_CONTRAST_THRESHOLD", "0.15")),
-    "glare": float(os.getenv("QR_GLARE_THRESHOLD", "0.3")),
+    "contrast": float(os.getenv("QR_CONTRAST_THRESHOLD", "0.20")),
+    "glare": float(os.getenv("QR_GLARE_THRESHOLD", "0.10")),
 }
 
 

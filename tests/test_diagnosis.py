@@ -62,7 +62,7 @@ class TestDiagnoseSingleResult:
 GOOD_QUALITY = {
     "blur_score": 200.0,
     "contrast": 0.8,
-    "glare_ratio": 0.1,
+    "glare_ratio": 0.02,
     "noise_level": 5.0,
 }
 BLUR_QUALITY = {
@@ -80,7 +80,7 @@ DARK_QUALITY = {
 GLARE_QUALITY = {
     "blur_score": 200.0,
     "contrast": 0.8,
-    "glare_ratio": 0.5,
+    "glare_ratio": 0.15,
     "noise_level": 5.0,
 }
 

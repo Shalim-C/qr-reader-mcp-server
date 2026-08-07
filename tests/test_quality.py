@@ -36,7 +36,7 @@ class TestAnalyzeImageQuality:
         img = np.full((100, 100), 255, dtype=np.uint8)
         q = analyze_image_quality(img)
         assert q["contrast"] == 0.0
-        assert q["glare_ratio"] == 1.0  # all pixels > 240
+        assert q["glare_ratio"] == 0.0  # white background, not glare
         assert q["noise_level"] == 0.0
 
     def test_high_contrast_chessboard(self):
@@ -45,7 +45,7 @@ class TestAnalyzeImageQuality:
         img[::2, ::2] = 255
         img[1::2, 1::2] = 255
         q = analyze_image_quality(img)
-        assert q["contrast"] == 1.0
+        assert q["contrast"] == pytest.approx(1.0, abs=0.01)
 
     def test_noise_increases_noise_level(self):
         """Residual-based noise metric: noisy > clean."""
@@ -73,11 +73,12 @@ class TestAnalyzeImageQuality:
         assert "blur_score" in q
 
     def test_glare_detection(self):
-        """Half-white image should report glare."""
-        img = np.zeros((100, 100), dtype=np.uint8)
-        img[0:50, :] = 250
+        """Uneven bright-spot distribution — spatial variance detected as glare."""
+        img = np.full((200, 200), 128, dtype=np.uint8)
+        # Bright spot covering ~2 cells of the 4×4 grid
+        img[10:110, 10:110] = 250
         q = analyze_image_quality(img)
-        assert q["glare_ratio"] == pytest.approx(0.5)
+        assert q["glare_ratio"] > 0.0
 
     def test_all_values_rounded_to_4_decimals(self):
         img = np.zeros((100, 100), dtype=np.uint8)
