@@ -6,7 +6,7 @@
 
 > 🤖 **通过 AI Agent 安装** — 把这条链接发给你的 AI Agent，它会自动完成安装配置：
 >
-> https://raw.githubusercontent.com/Shalim-C/qr-reader-mcp-server/main/INSTALL_FOR_AGENT.md
+> https://raw.githubusercontent.com/Endymionus/qr-reader-mcp-server/main/INSTALL_FOR_AGENT.md
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -150,7 +150,7 @@ python -m qr_reader.server
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "ghcr.io/Shalim-C/qr-reader-mcp-server"
+        "ghcr.io/Endymionus/qr-reader-mcp-server"
       ]
     }
   }

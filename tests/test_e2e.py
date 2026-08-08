@@ -22,7 +22,7 @@ from qr_reader.server import apply_operations
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════════
 
-REPO_URL = "https://github.com/Shalim-C/qr-reader-mcp-server"
+REPO_URL = "https://github.com/Endymionus/qr-reader-mcp-server"
 
 
 @pytest.fixture(scope="module")

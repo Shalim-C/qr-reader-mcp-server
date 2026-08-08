@@ -50,8 +50,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/shalim-c/qr-reader-mcp-server:${{ github.ref_name }}
-            ghcr.io/shalim-c/qr-reader-mcp-server:latest
+            ghcr.io/endymionus/qr-reader-mcp-server:${{ github.ref_name }}
+            ghcr.io/endymionus/qr-reader-mcp-server:latest
 
   github-release:
     runs-on: ubuntu-latest

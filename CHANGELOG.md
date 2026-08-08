@@ -74,6 +74,6 @@ All notable changes to QR Reader MCP Server will be documented in this file.
 - Pillow `contrast` fallback uses the same linear transform as cv2 (`np.clip(alpha*arr+beta)`) for consistent cross-backend behavior.
 - `pyzbar` is now a base dependency (was optional extra).
 
-[0.2.1]: https://github.com/Shalim-C/qr-reader-mcp-server/releases/tag/v0.2.1
-[0.2.0]: https://github.com/Shalim-C/qr-reader-mcp-server/releases/tag/v0.2.0
-[0.1.0]: https://github.com/Shalim-C/qr-reader-mcp-server/releases/tag/v0.1.0
+[0.2.1]: https://github.com/Endymionus/qr-reader-mcp-server/releases/tag/v0.2.1
+[0.2.0]: https://github.com/Endymionus/qr-reader-mcp-server/releases/tag/v0.2.0
+[0.1.0]: https://github.com/Endymionus/qr-reader-mcp-server/releases/tag/v0.1.0

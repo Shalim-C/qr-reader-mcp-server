@@ -5,7 +5,7 @@ Contributions are welcome — bug reports, feature ideas, documentation fixes, a
 ## Getting started
 
 ```bash
-git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
+git clone https://github.com/Endymionus/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
 pip install -e ".[dev]"
 ```

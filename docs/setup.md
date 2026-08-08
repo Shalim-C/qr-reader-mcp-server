@@ -23,7 +23,7 @@ choco install zbar
 ### 方式一：pip（推荐）
 
 ```bash
-git clone https://github.com/Shalim-C/qr-reader-mcp-server.git
+git clone https://github.com/Endymionus/qr-reader-mcp-server.git
 cd qr-reader-mcp-server
 pip install -e ".[full]"   # 推荐：包含 OpenCV + 全部增强
 # 或
@@ -92,7 +92,7 @@ pip install qr-reader-mcp-server
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "ghcr.io/Shalim-C/qr-reader-mcp-server"
+        "ghcr.io/Endymionus/qr-reader-mcp-server"
       ]
     }
   }
